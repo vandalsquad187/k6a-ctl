@@ -1,0 +1,31 @@
+:root{--bg:#0a0e17;--card:#141d2b;--border:#1a2332;--text:#c8d6e5;--sub:#6b7f9a;--acc:#2d4fd1;--green:#1b8a3d;--orange:#c97d1a}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif}
+.main{max-width:480px;margin:0 auto;padding:16px 14px 30px}
+
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.header h1{font-size:20px;color:var(--orange)}
+.pill{padding:4px 16px;border-radius:16px;font-size:12px;font-weight:700;background:var(--border);color:var(--sub)}
+.pill.gaming{background:#1b8a3d33;color:#4ade80;border:1px solid var(--green)}
+.pill.daily{background:#2d4fd133;color:#7ba3f7;border:1px solid var(--acc)}
+.pill.cd_l2,.pill.cd_l3,.pill.cd_l4{background:#c97d1a33;color:#ffb066;border:1px solid var(--orange)}
+
+.card{background:var(--card);border-radius:12px;padding:16px;margin-bottom:12px}
+.card h2{font-size:13px;color:var(--orange);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:9px 0}
+.row+.row{border-top:1px solid var(--border)}
+.label{font-size:14px}
+.val{font-size:14px;color:var(--sub);font-weight:500}
+
+.mode-switch{display:flex;gap:6px}
+.chip{padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;border:none;cursor:pointer;background:var(--border);color:var(--sub)}
+.chip.active{background:var(--acc);color:#fff;box-shadow:0 0 0 2px #ffffff40}
+
+.toggle{position:relative;width:44px;height:24px;cursor:pointer;display:inline-block}
+.toggle input{opacity:0;width:0;height:0}
+.slider{position:absolute;inset:0;background:var(--border);border-radius:12px;transition:.3s}
+.slider::before{content:'';position:absolute;left:3px;bottom:3px;width:18px;height:18px;background:var(--sub);border-radius:50%;transition:.3s}
+input:checked+.slider{background:var(--acc)}
+input:checked+.slider::before{background:#fff;transform:translateX(20px)}
+
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border);padding:8px 18px;border-radius:10px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none}

@@ -1,0 +1,6 @@
+id=k6a-ctl
+name=k6a-ctl
+version=1.0.0
+versionCode=1
+author=BadaZz89
+description=Slim gaming governor companion for BadazzKernel: dynamic clock tables, thermal cooldown with hysteresis, delegates to in-kernel k6a_gov when present. Single-source config, localhost WebUI.

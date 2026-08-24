@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache">
+<title>k6a-ctl</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="main">
+
+<div class="header">
+    <h1>k6a-ctl</h1>
+    <span id="statePill" class="pill">--</span>
+</div>
+
+<div class="card">
+    <div class="row">
+        <span class="label">Modus</span>
+        <span class="mode-switch">
+            <button id="btnDaily" class="chip" onclick="setMode('daily')">Daily</button>
+            <button id="btnGaming" class="chip" onclick="setMode('gaming')">🎮 Gaming</button>
+        </span>
+    </div>
+    <div class="row">
+        <span class="label">Thermal-Schutz</span>
+        <label class="toggle"><input type="checkbox" id="thpToggle" onchange="setThp(this.checked)">
+        <span class="slider"></span></label>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Status</h2>
+    <div class="row"><span class="label">Temp</span><span class="val" id="vTemp">--°C</span></div>
+    <div class="row"><span class="label">CPU Silver</span><span class="val" id="vSil">-- MHz</span></div>
+    <div class="row"><span class="label">CPU Gold</span><span class="val" id="vGold">-- MHz</span></div>
+    <div class="row"><span class="label">GPU</span><span class="val" id="vGpu">-- MHz</span></div>
+    <div class="row"><span class="label">Kernel-Governor</span><span class="val" id="vDel">--</span></div>
+    <div class="row"><span class="label">Tick</span><span class="val" id="vTick">--</span></div>
+</div>
+
+<div id="toast"></div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

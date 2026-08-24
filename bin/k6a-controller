@@ -1,0 +1,252 @@
+#!/system/bin/sh
+# k6a-ctl controller v1.0.0 — slim state machine + k6a_gov delegation
+# states: DAILY | GAMING | CD_L2 | CD_L3 | CD_L4
+# tick-sleep: daily=15s gaming=1s cooldown=2s
+
+MODDIR="${1:-/data/adb/modules/k6a_tune_staging}"
+CONFIG="$MODDIR/config/settings.conf"
+LOG="$MODDIR/config/service.log"
+DATA="$MODDIR/webroot/data.txt"
+PIDF="$MODDIR/run/controller.pid"
+GOV="/sys/kernel/k6a_gov"
+
+export MODDIR LOG_FILE=$LOG
+. "$MODDIR/bin/k6a-lib.sh"
+
+STATE="DAILY"; TICK=0; IDLE=0; _PREV=0; _GAMING_APPLIED=0
+CFG_DEBUG=0
+
+cfg() { grep "^${1}=" "$CONFIG" 2>/dev/null | tail -1 | cut -d= -f2 | sed 's/[[:space:]]*#.*//' | tr -d ' \t'; }
+
+cfg_load() {
+    MODE=$(cfg mode);        [ "$MODE" != "gaming" ] && MODE="daily"
+    THP=$(cfg thermal_protect); [ "$THP" != "off" ] && THP="on"
+    PKG=$(cfg game_pkg);     PKG=${PKG:-com.activision.callofduty.shooter}
+    L2=$(cfg cd_l2_temp);    case "$L2" in ''|*[!0-9]*) L2=80;; esac
+    L3=$(cfg cd_l3_temp);    case "$L3" in ''|*[!0-9]*) L3=82;; esac
+    L4=$(cfg cd_l4_temp);    case "$L4" in ''|*[!0-9]*) L4=88;; esac
+    REC=$(cfg cd_recover);   case "$REC" in ''|*[!0-9]*) REC=76;; esac
+    HF=$(cfg hysteresis_fast);   case "$HF" in ''|*[!0-9]*) HF=3;; esac
+    HN=$(cfg hysteresis_normal); case "$HN" in ''|*[!0-9]*) HN=10;; esac
+    P2=$(cfg cd_l2_gold_pct); case "$P2" in ''|*[!0-9]*) P2=90;; esac
+    P3=$(cfg cd_l3_gold_pct); case "$P3" in ''|*[!0-9]*) P3=70;; esac
+    P4=$(cfg cd_l4_gold_pct); case "$P4" in ''|*[!0-9]*) P4=58;; esac
+    G2=$(cfg cd_l2_gpu_pct); case "$G2" in ''|*[!0-9]*) G2=70;; esac
+    G3=$(cfg cd_l3_gpu_pct); case "$G3" in ''|*[!0-9]*) G3=44;; esac
+    G4=$(cfg cd_l4_gpu_pct); case "$G4" in ''|*[!0-9]*) G4=33;; esac
+    CFG_DEBUG=$(cfg debug); [ "$CFG_DEBUG" != "1" ] && CFG_DEBUG=0
+}
+
+# ── single instance guard ───────────────────────────────────────────────────
+LOCKDIR="$MODDIR/run/ctrl.lock"
+_startup() {
+    mkdir -p "$MODDIR/run" "$MODDIR/config" "$MODDIR/webroot" 2>/dev/null
+    # atomares lock: mkdir gewinnt genau einmal — keine instanzen-races
+    if ! mkdir "$LOCKDIR" 2>/dev/null; then
+        # stale-lock erkennen: besitzer tot ODER ohne pid-file (crash-fall!)
+        OLD=$(cat "$PIDF" 2>/dev/null)
+        STALE=0
+        if [ -z "$OLD" ]; then
+            # lock ohne pidfile = crash-leiche → übernehmen
+            STALE=1
+        elif [ -d "/proc/$OLD" ]; then
+            c=$(tr '\0' ' ' < "/proc/$OLD/cmdline" 2>/dev/null)
+            case "$c" in *k6a-ctl*) err "läuft bereits (pid $OLD)"; exit 1 ;; *) STALE=1 ;; esac
+        else
+            STALE=1
+        fi
+        if [ "$STALE" = "1" ]; then
+            warn "stale-lock übernommen (vorheriger besitzer: ${OLD:-keiner})"
+            rm -rf "$LOCKDIR"; rm -f "$PIDF"
+            mkdir "$LOCKDIR" 2>/dev/null || { err "lock belegt"; exit 1; }
+        fi
+    fi
+    trap 'rm -rf "$LOCKDIR"; rm -f "$PIDF"; exit' INT TERM
+    echo $$ > "$PIDF"
+    rm -f "$MODDIR"/run/*.tmp 2>/dev/null
+    cfg_load; _cache_thermal_zones; _init_freq_tables
+    # Delegation AUS: kernel cd_thresholds gold-indizes cappen zu hart
+    # (idx2=979MHz → 10fps). Reaktivierung erst nach KB-Fix der idx-semantik.
+    DELEGATED=0
+    if gov_sysfs_exists; then w "$GOV/enable" 0; fi
+    log "legacy userspace-cooldown (delegation bewusst aus)"
+    log "k6a-ctl v1.0.0 start (mode=$MODE thp=$THP delegated=$DELEGATED)"
+}
+
+_apply_schedutil() { # $1=gaming|daily
+    local ib=/sys/module/cpu_boost/parameters
+    if [ "$1" = "gaming" ]; then
+        w "$P0/schedutil/up_rate_limit_us" 500
+        w "$P0/schedutil/down_rate_limit_us" 20000
+        w "$P6/schedutil/up_rate_limit_us" 500
+        w "$P6/schedutil/down_rate_limit_us" 20000
+        w "$P0/schedutil/hispeed_load" 50
+        w "$P0/schedutil/hispeed_freq" "$(gold_at_pct 90)"
+        w "$P6/schedutil/hispeed_load" 50
+        w "$P6/schedutil/hispeed_freq" "$GOLD_MAX"
+        [ -d "$ib" ] && {
+            w "$ib/input_boost_freq" "0:$(_pick_freq "$SILVER_FREQS" $(( SILVER_MAX * 70 / 100 ))) 1:$(_pick_freq "$SILVER_FREQS" $(( SILVER_MAX * 70 / 100 ))) 2:$(_pick_freq "$SILVER_FREQS" $(( SILVER_MAX * 70 / 100 ))) 3:$(_pick_freq "$SILVER_FREQS" $(( SILVER_MAX * 70 / 100 ))) 4:$(_pick_freq "$SILVER_FREQS" $(( SILVER_MAX * 70 / 100 ))) 5:$(_pick_freq "$SILVER_FREQS" $(( SILVER_MAX * 70 / 100 ))) 6:$(gold_at_pct 90) 7:$(gold_at_pct 90)"
+            w "$ib/input_boost_ms" 40
+        }
+    else
+        w "$P0/schedutil/up_rate_limit_us" 10000
+        w "$P0/schedutil/down_rate_limit_us" 50000
+        w "$P6/schedutil/up_rate_limit_us" 10000
+        w "$P6/schedutil/down_rate_limit_us" 50000
+        [ -d "$ib" ] && w "$ib/input_boost_ms" 0
+    fi
+}
+
+_apply_gaming_userspace() {
+    # userspace-Aufgaben im Gaming-Modus (unabhängig von Delegation):
+    _apply_schedutil gaming
+    local pid; pid=$(pidof "$PKG" 2>/dev/null | awk '{print $1}')
+    if [ -n "$pid" ]; then
+        for tid in /proc/"$pid"/task/*/; do
+            tid=${tid%/}; tid=${tid##*/}
+            tn=$(cat "/proc/$pid/task/$tid/comm" 2>/dev/null)
+            case "$tn" in
+                *RenderThread*|*UnityMain*|*GLThread*)
+                    taskset -p 0xc0 "$tid" >/dev/null 2>&1 ;;
+                *Audio*|*audio*) taskset -p 0x3f "$tid" >/dev/null 2>&1 ;;
+            esac
+        done
+        renice -n -10 "$pid" >/dev/null 2>&1
+        echo -17 > "/proc/$pid/oom_adj" 2>/dev/null
+    fi
+    setprop persist.sys.game_mode 1 2>/dev/null
+    setprop persist.sys.vulkan.perf_mode 1 2>/dev/null
+}
+
+_enter_daily() {
+    STATE="DAILY"; _GAMING_APPLIED=0; IDLE=0
+    _apply_schedutil daily
+    setprop persist.sys.game_mode 0 2>/dev/null
+    if [ "$DELEGATED" = "1" ] && [ -d "$GOV" ]; then w "$GOV/enable" 0; fi
+    # sanfte limits: gold auf 100% lassen, nur governor normal
+    log "-> DAILY"
+}
+
+_enter_gaming() {
+    STATE="GAMING"; IDLE=0
+    cpu_apply "$SILVER_MAX" "$GOLD_MAX"
+    gpu_limits "$GPU_MAX"
+    log "-> GAMING (delegated=$DELEGATED)"
+}
+
+_do_cooldown_limits() { # $1=level
+    case "$1" in
+        CD_L2) GM=$(gold_at_pct "$P2"); GP=$(gpu_at_pct "$G2") ;;
+        CD_L3) GM=$(gold_at_pct "$P3"); GP=$(gpu_at_pct "$G3") ;;
+        CD_L4) GM=$(gold_at_pct "$P4"); GP=$(gpu_at_pct "$G4") ;;
+    esac
+    cpu_apply "$( _pick_freq "$SILVER_FREQS" $(( GM * SILVER_MAX / GOLD_MAX )) )" "$GM"
+    gpu_limits "$GP"
+}
+
+_state_machine() { # $1=temp
+    local t=$1 now=$(date +%s) delta dwell
+    delta=$(( t - _PREV )); _PREV=$t
+    case "$delta" in -*) dwell=$HN ;; *) [ "$delta" -ge 5 ] && dwell=$HF || dwell=$HN ;; esac
+    case "$STATE" in
+        GAMING)
+            if   [ "$t" -ge "$L4" ]; then STATE="CD_L4"; log "cooldown L4 @ ${t}°C"
+            elif [ "$t" -ge "$L3" ]; then STATE="CD_L3"; log "cooldown L3 @ ${t}°C"
+            elif [ "$t" -ge "$L2" ]; then STATE="CD_L2"; log "cooldown L2 @ ${t}°C"
+            fi ;;
+        CD_L4|CD_L3|CD_L2)
+            if [ "$t" -le "$REC" ]; then
+                STATE="GAMING"; log "recover @ ${t}°C"
+                cpu_apply "$SILVER_MAX" "$GOLD_MAX"; gpu_limits "$GPU_MAX"
+            elif [ "$STATE" = "CD_L4" ] && [ "$t" -lt "$L3" ]; then STATE="CD_L3"
+            elif [ "$STATE" = "CD_L3" ] && [ "$t" -lt "$L2" ]; then STATE="CD_L2"
+            fi ;;
+    esac
+}
+
+_write_data() {
+    local t=$1 cs cg gm
+    cs=$(( $(r "$P0/scaling_cur_freq") / 1000 ))
+    cg=$(( $(r "$P6/scaling_cur_freq") / 1000 ))
+    gm=$(( $(r "$GPU/devfreq/cur_freq") / 1000000 ))
+    local bpc btp btpc
+    bpc=$(r /sys/class/power_supply/battery/capacity)
+    btp=$(r /sys/class/power_supply/battery/temp)
+    btpc="$(( btp / 10 )).$(( btp % 10 ))"
+    cat > "${DATA}.tmp" << EOF
+state=$STATE
+mode=$MODE
+thermal_protect=$THP
+temp=$t
+cpu_sil_mhz=$cs
+cpu_gold_mhz=$cg
+gpu_mhz=$gm
+delegated=$DELEGATED
+tick=$TICK
+bat=${bpc}%
+bat_temp=${btpc}
+ts=$(date +%s)
+EOF
+    mv "${DATA}.tmp" "$DATA"
+}
+
+trap 'rm -f "$PIDF"; exit 143' INT TERM
+_startup
+
+log "main loop"
+while true; do
+    OLD=$(cat "$PIDF" 2>/dev/null)
+    if [ -n "$OLD" ] && [ "$OLD" != "$$" ] && [ -d "/proc/$OLD" ]; then exit 0; fi
+    echo $$ > "$PIDF"
+
+    cfg_load
+    TEMP_NOW=$(read_temp)
+
+    if [ "$MODE" = "gaming" ]; then
+        [ "$STATE" = "DAILY" ] && _enter_gaming
+        [ "$_GAMING_APPLIED" = "0" ] && { _apply_gaming_userspace; _GAMING_APPLIED=1; }
+        [ $(( TICK % 5 )) -eq 0 ] && _apply_gaming_userspace
+
+        if [ "$THP" = "on" ]; then
+            if [ "$DELEGATED" = "1" ] && [ -d "$GOV" ]; then
+                # Kernel-State ist Wahrheit, Modul setzt die Caps um (Badazz-%)
+                GS=$(grep -oE "state=[a-z0-9_]+" "$GOV/status" 2>/dev/null | head -1 | cut -d= -f2)
+                case "$GS" in
+                    cd_l2|cd_l3|cd_l4)
+                        # Kernel-Caps sind zu hart (asc-idx) → eigene % -Caps setzen
+                        case "$GS" in
+                            cd_l2) STATE="CD_L2"; _do_cooldown_limits CD_L2 ;;
+                            cd_l3) STATE="CD_L3"; _do_cooldown_limits CD_L3 ;;
+                            cd_l4) STATE="CD_L4"; _do_cooldown_limits CD_L4 ;;
+                        esac ;;
+                    gaming)
+                        STATE="GAMING"
+                        cpu_apply "$SILVER_MAX" "$GOLD_MAX"; gpu_limits "$GPU_MAX" ;;
+                    *)
+                        # gov aus/inaktiv → volle Eigenverantwortung (legacy)
+                        _state_machine "$TEMP_NOW"
+                        case "$STATE" in
+                            CD_L2|CD_L3|CD_L4) _do_cooldown_limits "$STATE" ;;
+                            GAMING) cpu_apply "$SILVER_MAX" "$GOLD_MAX"; gpu_limits "$GPU_MAX" ;;
+                        esac ;;
+                esac
+            else
+                _state_machine "$TEMP_NOW"
+                case "$STATE" in
+                    CD_L2|CD_L3|CD_L4) _do_cooldown_limits "$STATE" ;;
+                    GAMING) cpu_apply "$SILVER_MAX" "$GOLD_MAX"; gpu_limits "$GPU_MAX" ;;
+                esac
+            fi
+        fi
+        SLEEP=1
+        case "$STATE" in CD_L2|CD_L3|CD_L4) SLEEP=2 ;; esac
+    else
+        [ "$STATE" != "DAILY" ] && _enter_daily
+        SLEEP=5
+    fi
+
+    _write_data "$TEMP_NOW"
+    TICK=$(( TICK + 1 ))
+    [ $(( TICK % 60 )) -eq 0 ] && log "hb tick=$TICK state=$STATE temp=${TEMP_NOW}"
+    sleep $SLEEP
+done
