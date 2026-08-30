@@ -28,4 +28,18 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,
 input:checked+.slider{background:var(--acc)}
 input:checked+.slider::before{background:#fff;transform:translateX(20px)}
 
+/* BW-Floors grid */
+.bw-grid{display:grid;gap:4px}
+.bw-header{display:grid;grid-template-columns:80px 1fr 1fr 1fr;gap:4px;text-align:center;font-size:11px;color:var(--sub);text-transform:uppercase;padding:4px 0}
+.bw-row{display:grid;grid-template-columns:80px 1fr 1fr 1fr;gap:4px;align-items:center}
+.bw-input{width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;text-align:center;font-family:monospace}
+.bw-input:focus{outline:none;border-color:var(--acc)}
+.bw-buttons{display:flex;gap:8px;margin-top:10px;justify-content:flex-end}
+
+/* History table */
+.hist-table{width:100%;border-collapse:collapse;font-size:12px}
+.hist-table th{color:var(--sub);text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);font-weight:500}
+.hist-table td{padding:4px 8px;color:var(--text);border-bottom:1px solid #1a233220}
+.hist-table tr:last-child td{border-bottom:none}
+
 #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border);padding:8px 18px;border-radius:10px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none}

@@ -38,6 +38,48 @@
     <div class="row"><span class="label">GPU</span><span class="val" id="vGpu">-- MHz</span></div>
     <div class="row"><span class="label">Kernel-Governor</span><span class="val" id="vDel">--</span></div>
     <div class="row"><span class="label">Tick</span><span class="val" id="vTick">--</span></div>
+    <div class="row"><span class="label">Akku</span><span class="val" id="vBat">--</span></div>
+</div>
+
+<div class="card">
+    <h2>Kernel Governor</h2>
+    <div class="row"><span class="label">Version</span><span class="val" id="vGovVer">--</span></div>
+    <div class="row"><span class="label">State</span><span class="val" id="vGovState">--</span></div>
+    <div class="row"><span class="label">Profil</span><span class="val" id="vGovProfile">--</span></div>
+    <div class="row"><span class="label">Throttle Events</span><span class="val" id="vGovThrottle">0</span></div>
+    <div class="row"><span class="label">Build Hash</span><span class="val" id="vGovHash">--</span></div>
+    <div class="row"><span class="label">GPU Caps (L2/L3/L4)</span><span class="val" id="vGpuCaps">--</span></div>
+</div>
+
+<div class="card">
+    <h2>Bandwidth Floors</h2>
+    <div class="bw-grid">
+        <div class="bw-header"><span></span><span>L2</span><span>L3</span><span>L4</span></div>
+        <div class="bw-row">
+            <span class="label">GPU-BW</span>
+            <input type="number" id="bw_gpubw_0" class="bw-input" value="0">
+            <input type="number" id="bw_gpubw_1" class="bw-input" value="0">
+            <input type="number" id="bw_gpubw_2" class="bw-input" value="0">
+        </div>
+        <div class="bw-row">
+            <span class="label">LLCC</span>
+            <input type="number" id="bw_llcc_0" class="bw-input" value="0">
+            <input type="number" id="bw_llcc_1" class="bw-input" value="0">
+            <input type="number" id="bw_llcc_2" class="bw-input" value="0">
+        </div>
+    </div>
+    <div class="bw-buttons">
+        <button class="chip active" onclick="applyBwFloors()">Apply</button>
+        <button class="chip" onclick="resetBwFloors()">Reset</button>
+    </div>
+</div>
+
+<div class="card">
+    <h2>History (letzte 15)</h2>
+    <table class="hist-table">
+        <thead><tr><th>Zeit</th><th>Temp</th><th>Transition</th></tr></thead>
+        <tbody id="histBody"></tbody>
+    </table>
 </div>
 
 <div id="toast"></div>

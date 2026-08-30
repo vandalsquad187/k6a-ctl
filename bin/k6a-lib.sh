@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# k6a-ctl lib v1.0.0 — slim hardware layer for sweet (SM7150-class)
+# k6a-ctl lib v1.1.0 — slim hardware layer for sweet (SM7150-class)
 # Rules: no hardcoded freqs, no alias traps, dynamic tables only.
 
 unalias r 2>/dev/null || true
@@ -8,18 +8,18 @@ MODDIR=${MODDIR:-/data/adb/modules/k6a-ctl}
 GPU=/sys/class/kgsl/kgsl-3d0
 P0=/sys/devices/system/cpu/cpufreq/policy0
 P6=/sys/devices/system/cpu/cpufreq/policy6
+GOV=/sys/kernel/k6a_gov
 LOG_FILE=${LOG_FILE:-$MODDIR/config/service.log}
 
-log()  { printf '[%s] [INFO] %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOG_FILE" 2>/dev/null; }
-warn() { printf '[%s] [WARN] %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOG_FILE" 2>/dev/null; }
-err()  { printf '[%s] [ERROR] %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOG_FILE" 2>/dev/null; }
-dbg()  { [ "${CFG_DEBUG:-0}" = "1" ] && printf '[%s] [DBG] %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOG_FILE" 2>/dev/null; }
+log()  { printf '[%s] [INFO] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }
+warn() { printf '[%s] [WARN] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }
+err()  { printf '[%s] [ERROR] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }
+dbg()  { [ "${CFG_DEBUG:-0}" = "1" ] && printf '[%s] [DBG] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }
 
 r() { cat "$1" 2>/dev/null || echo "0"; }
 w() { printf '%s' "$2" > "$1" 2>/dev/null; }
 
 # ── dynamic clock tables ────────────────────────────────────────────────────
-# liest verfügbare frequenzen, wählt nächst-verfügbaren wert <= ziel-prozent
 _init_freq_tables() {
     SILVER_FREQS=$(r "$P0/scaling_available_frequencies")
     GOLD_FREQS=$(r "$P6/scaling_available_frequencies")
@@ -34,8 +34,7 @@ _init_freq_tables() {
     dbg "tables: silver_max=$SILVER_MAX gold_max=$GOLD_MAX gpu=$GPU_MIN-$GPU_MAX"
 }
 
-# nächst-niedrigere verfügbare freq <= ziel
-_pick_freq() { # $1=table $2=target
+_pick_freq() {
     local best=0 f
     for f in $1; do
         [ "$f" -le "$2" ] 2>/dev/null && [ "$f" -gt "$best" ] 2>/dev/null && best=$f
@@ -81,3 +80,35 @@ gpu_limits() { # $1=max_hz ($GPU_MAX = frei)
 }
 
 gov_sysfs_exists() { [ -d /sys/kernel/k6a_gov ]; }
+
+# ── kernel governor helpers ─────────────────────────────────────────────────
+gov_write() { w "$GOV/$1" "$2"; }
+gov_read()  { r "$GOV/$1"; }
+
+profile_to_idx() {
+    case "$1" in
+        off) echo 0 ;; gaming) echo 1 ;; battery) echo 2 ;;
+        badazz) echo 3 ;; custom) echo 4 ;; badazz_safe) echo 5 ;;
+        *) echo 1 ;;
+    esac
+}
+
+idx_to_profile() {
+    case "$1" in
+        0) echo "off" ;; 1) echo "gaming" ;; 2) echo "battery" ;;
+        3) echo "badazz" ;; 4) echo "custom" ;; 5) echo "badazz_safe" ;;
+        *) echo "unknown" ;;
+    esac
+}
+
+gov_get_state() {
+    gov_read "status" 2>/dev/null | grep -oE "state=[a-z0-9_]+" | head -1 | cut -d= -f2
+}
+
+gov_get_throttle() {
+    gov_read "status" 2>/dev/null | grep -oE "throttle_events=[0-9]+" | head -1 | cut -d= -f2
+}
+
+gov_get_hash() {
+    gov_read "status" 2>/dev/null | grep -oE "hash_verified=[01]" | head -1 | cut -d= -f2
+}
