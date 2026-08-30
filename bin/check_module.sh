@@ -58,12 +58,26 @@ echo "[5] Config"
 CONF="$MOD/config/settings.conf"
 [ -f "$CONF" ] || _fail "settings.conf fehlt"
 if [ -f "$CONF" ]; then
-    L2=$(grep "^cd_l2_temp=" "$CONF" | cut -d= -f2); L3=$(grep "^cd_l3_temp=" "$CONF" | cut -d= -f2)
-    L4=$(grep "^cd_l4_temp=" "$CONF" | cut -d= -f2); RC=$(grep "^cd_recover=" "$CONF" | cut -d= -f2)
-    if [ "${RC:-76}" -ge "${L2:-80}" ] 2>/dev/null; then _fail "recover >= l2"; 
-    elif [ "${L2:-80}" -ge "${L3:-82}" ] 2>/dev/null; then _fail "l2 >= l3";
-    elif [ "${L3:-82}" -ge "${L4:-88}" ] 2>/dev/null; then _fail "l3 >= l4";
-    else _pass "thresholds ${RC}°<${L2}°<${L3}°<${L4}°"; fi
+    DEL=$(grep "^delegated=" "$CONF" | cut -d= -f2 | tr -d ' ')
+    [ "$DEL" = "1" ] && _pass "delegated=1 (kernel governor)" || _pass "delegated=0 (legacy)"
+
+    if [ "$DEL" = "1" ]; then
+        # Delegated: thresholds in kernel, prüfe profile + auto_badazz
+        PROF=$(grep "^profile=" "$CONF" | cut -d= -f2 | tr -d ' ')
+        case "$PROF" in gaming|battery|badazz|badazz_safe) _pass "profile=$PROF" ;; *) _fail "profile ungültig: [$PROF]" ;; esac
+        ABT=$(grep "^auto_badazz_temp=" "$CONF" | cut -d= -f2 | tr -d ' ')
+        [ -n "$ABT" ] && [ "$ABT" -ge 70 ] 2>/dev/null && [ "$ABT" -le 95 ] 2>/dev/null \
+            && _pass "auto_badazz_temp=${ABT}°C" || _fail "auto_badazz_temp ungültig: [$ABT]"
+    else
+        # Legacy: thresholds in settings.conf
+        L2=$(grep "^cd_l2_temp=" "$CONF" | cut -d= -f2); L3=$(grep "^cd_l3_temp=" "$CONF" | cut -d= -f2)
+        L4=$(grep "^cd_l4_temp=" "$CONF" | cut -d= -f2); RC=$(grep "^cd_recover=" "$CONF" | cut -d= -f2)
+        if [ "${RC:-76}" -ge "${L2:-80}" ] 2>/dev/null; then _fail "recover >= l2";
+        elif [ "${L2:-80}" -ge "${L3:-82}" ] 2>/dev/null; then _fail "l2 >= l3";
+        elif [ "${L3:-82}" -ge "${L4:-88}" ] 2>/dev/null; then _fail "l3 >= l4";
+        else _pass "thresholds ${RC}°<${L2}°<${L3}°<${L4}°"; fi
+    fi
+
     m=$(grep "^mode=" "$CONF" | cut -d= -f2 | tr -d ' ')
     case "$m" in gaming|daily) _pass "mode=$m" ;; *) _fail "mode ungültig: [$m]" ;; esac
 fi
