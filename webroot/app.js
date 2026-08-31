@@ -13,16 +13,6 @@ try{if(window.KernelSU&&window.KernelSU.exec){window.KernelSU.exec(cmd,'',functi
 
 function api(path) {
     new Image().src = 'http://127.0.0.1:8767' + path + '&t=' + Date.now();
-    var MP = '/data/adb/modules/k6a-ctl';
-    var m;
-    if ((m = path.match(/^\/mode\?m=(\w+)$/)))
-        ksuExec("sed -i 's|^mode=.*|mode=" + m[1] + "|' " + MP + "/config/settings.conf");
-    else if ((m = path.match(/^\/thermal\?t=(\w+)$/)))
-        ksuExec("sed -i 's|^thermal_protect=.*|thermal_protect=" + m[1] + "|' " + MP + "/config/settings.conf");
-    else if ((m = path.match(/^\/profile\?p=(\w+)$/)))
-        ksuExec("sed -i 's|^profile=.*|profile=" + m[1] + "|' " + MP + "/config/settings.conf");
-    else if ((m = path.match(/^\/delegated\?d=(\d)$/)))
-        ksuExec("sed -i 's|^delegated=.*|delegated=" + m[1] + "|' " + MP + "/config/settings.conf");
 }
 
 function toast(msg) {
@@ -73,13 +63,18 @@ function parseBwFloors() {
 function applyBwFloors() {
     var vals = [];
     for (var i = 0; i < 3; i++) {
-        vals.push(document.getElementById('bw_gpubw_' + i).value || '0');
-        vals.push(document.getElementById('bw_llcc_' + i).value || '0');
+        var a = document.getElementById('bw_gpubw_' + i).value;
+        var b = document.getElementById('bw_llcc_' + i).value;
+        var na = Number(a), nb = Number(b);
+        if (!Number.isInteger(na) || na < 0 || na > 20000) { toast('GPU-BW L' + (i+2) + ' 0..20000'); return; }
+        if (!Number.isInteger(nb) || nb < 0 || nb > 20000) { toast('LLCC L' + (i+2) + ' 0..20000'); return; }
+        vals.push(String(na));
+        vals.push(String(nb));
     }
-    var cmd = "echo '" + vals.join(' ') + "' > /sys/kernel/k6a_gov/bw_floors";
-    ksuExec(cmd);
-    toast('BW-Floors angewendet');
-    setTimeout(fetchData, 500);
+    var path = '/bw_floors?bw=' + vals.join('_');
+    new Image().src = 'http://127.0.0.1:8767' + path + '&t=' + Date.now();
+    toast('BW-Floors gesendet');
+    setTimeout(fetchData, 800);
 }
 
 function resetBwFloors() {
