@@ -8,7 +8,12 @@ log() { printf '[%s] [SVC] %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOG" 2>/dev/nul
 mkdir -p "$MODDIR/run" "$MODDIR/config" "$MODDIR/webroot" 2>/dev/null
 chmod 755 "$MODDIR/bin/k6a-controller" "$MODDIR/bin/webui-server.sh" "$MODDIR/bin/webui-handler.sh" 2>/dev/null
 
-until [ "$(getprop sys.boot_completed)" = "1" ]; do sleep 3; done
+_tries=0
+until [ "$(getprop sys.boot_completed)" = "1" ]; do
+    sleep 3
+    _tries=$((_tries + 1))
+    [ "$_tries" -ge 40 ] && { log "boot_completed timeout 120s — starte trotzdem"; break; }
+done
 sleep 5
 log "service start"
 
@@ -31,8 +36,13 @@ while true; do
     nice -n -5 sh "$CTRL" "$MODDIR"
     RC=$?
     [ -f "$MODDIR/run/stop" ] && { rm -f "$MODDIR/run/stop"; log "stop-file — ende"; break; }
-    [ "$RC" = "0" ] && RC=143
-    _now=$(cut -d. -f1 /proc/uptime)
+    if [ "$RC" = "0" ]; then
+        log "controller clean exit 0 — kein Crash"
+        _crashes=0; _backoff=3; _window=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)
+        sleep 1
+        continue
+    fi
+    _now=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)
     if [ $(( _now - _window )) -lt 60 ]; then
         _crashes=$(( _crashes + 1 ))
         [ "$_crashes" -gt 10 ] && { log "crash storm — gebe auf"; break; }

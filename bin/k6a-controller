@@ -16,15 +16,29 @@ export MODDIR LOG_FILE=$LOG
 STATE="DAILY"; TICK=0; IDLE=0; _PREV=0; _GAMING_APPLIED=0
 CFG_DEBUG=0
 
-cfg() { grep "^${1}=" "$CONFIG" 2>/dev/null | tail -1 | cut -d= -f2 | sed 's/[[:space:]]*#.*//' | tr -d ' \t'; }
-
+cfg() {
+    local _k="$1" _v="" _line _kk _vv
+    [ -f "$CONFIG" ] || return 1
+    while IFS= read -r _line || [ -n "$_line" ]; do
+        case "$_line" in \#*|"") continue ;; esac
+        _kk=${_line%%=*}; _vv=${_line#*=}
+        [ "$_kk" = "$_k" ] || continue
+        _vv=${_vv%%#*}; _vv=$(printf '%s' "$_vv" | tr -d ' \t\r\n')
+        _v="$_vv"
+    done < "$CONFIG" 2>/dev/null
+    printf '%s' "$_v"
+}
 cfg_load() {
     MODE=$(cfg mode);        [ "$MODE" != "gaming" ] && MODE="daily"
     THP=$(cfg thermal_protect); [ "$THP" != "off" ] && THP="on"
     PKG=$(cfg game_pkg);     PKG=${PKG:-com.activision.callofduty.shooter}
+    case "$PKG" in ""|*[!A-Za-z0-9._]*) PKG="com.activision.callofduty.shooter" ;; esac
     DELEGATED=$(cfg delegated); [ "$DELEGATED" != "0" ] && DELEGATED=1
-    PROFILE=$(cfg profile);  [ -z "$PROFILE" ] && PROFILE="gaming"
-    AUTO_BT=$(cfg auto_badazz_temp); [ -z "$AUTO_BT" ] && AUTO_BT=85
+    PROFILE=$(cfg profile)
+    case "$PROFILE" in gaming|battery|badazz|badazz_safe|custom|off) ;; *) PROFILE="gaming" ;; esac
+    AUTO_BT=$(cfg auto_badazz_temp)
+    case "$AUTO_BT" in ''|*[!0-9]*) AUTO_BT=85 ;; *) [ "$AUTO_BT" -lt 70 ] 2>/dev/null && AUTO_BT=70; [ "$AUTO_BT" -gt 95 ] 2>/dev/null && AUTO_BT=95 ;; esac
+    AUTO_HYST=$(cfg auto_badazz_hyst); case "$AUTO_HYST" in ''|*[!0-9]*) AUTO_HYST=5 ;; *) [ "$AUTO_HYST" -lt 3 ] 2>/dev/null && AUTO_HYST=3; [ "$AUTO_HYST" -gt 10 ] 2>/dev/null && AUTO_HYST=10 ;; esac
     CFG_DEBUG=$(cfg debug); [ "$CFG_DEBUG" != "1" ] && CFG_DEBUG=0
 }
 
@@ -68,17 +82,16 @@ _apply_profile() { # $1=profile-name
 
 # ── auto badazz_safe switch ─────────────────────────────────────────────────
 _auto_badazz_switch() { # $1=current_temp
-    local t=$1
-    local cur_profile
-    cur_profile=$(gov_read "profile" 2>/dev/null | tr -d '\n')
-
-    if [ "$STATE" = "GAMING" ] && [ "$t" -ge "$AUTO_BT" ]; then
+    local t=$1 cur_profile
+    [ "$PROFILE" = "gaming" ] || return 0
+    cur_profile=$(gov_read "profile" 2>/dev/null | tr -d ' \n\r\t')
+    if [ "$STATE" = "GAMING" ] && [ "$t" -ge "$AUTO_BT" ] 2>/dev/null; then
         case "$cur_profile" in
-            1|gaming) _apply_profile "badazz_safe"; log "auto → badazz_safe @ ${t}°C" ;;
+            1|gaming) _apply_profile "badazz_safe"; log "auto → badazz_safe @ ${t}°C (hyst ${AUTO_HYST})" ;;
         esac
-    elif [ "$STATE" = "DAILY" ] || [ "$t" -lt "$(( AUTO_BT - 5 ))" ]; then
+    elif [ "$t" -lt "$(( AUTO_BT - AUTO_HYST ))" ] 2>/dev/null; then
         case "$cur_profile" in
-            5|badazz_safe) _apply_profile "gaming"; log "auto → gaming @ ${t}°C" ;;
+            5|badazz_safe) _apply_profile "$PROFILE"; log "auto → $PROFILE @ ${t}°C (hyst ${AUTO_HYST})" ;;
         esac
     fi
 }
