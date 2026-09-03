@@ -4,7 +4,14 @@ MODDIR=/data/adb/modules/k6a-ctl
 LOG=$MODDIR/config/service.log
 PIDF=$MODDIR/run/webui.pid
 
-log() { printf '[%s] [WEBUI] %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOG" 2>/dev/null; }
+_logrot() {
+    local sz
+    sz=$(stat -c%s "$LOG" 2>/dev/null || wc -c < "$LOG" 2>/dev/null) || return 0
+    [ -n "$sz" ] && [ "$sz" -gt 102400 ] 2>/dev/null || return 0
+    mv -f "${LOG}.1" "${LOG}.2" 2>/dev/null
+    mv -f "$LOG" "${LOG}.1" 2>/dev/null
+}
+log() { _logrot; printf '[%s] [WEBUI] %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOG" 2>/dev/null; }
 trap 'rm -f "$PIDF"; exit' INT TERM
 
 echo $$ > "$PIDF"

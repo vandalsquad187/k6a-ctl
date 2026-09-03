@@ -41,9 +41,19 @@ bw_set() {
     printf '%s' "$vals" > /sys/kernel/k6a_gov/bw_floors 2>/dev/null
 }
 
-# REQ log: CRLF + injection strip
+# REQ log: CRLF + injection strip (only state-changing, no /ping spam)
 _logq=$(printf '%s' "$REQ" | tr -d '\r\n' | cut -c1-120)
-echo "[$(date '+%H:%M:%S')] [WEBUI] REQ: $_logq" >> "${CONF%/*}/../config/service.log" 2>/dev/null
+_logf="${CONF%/*}/../config/service.log"
+case "$P" in
+    /ping) ;;
+    *)
+        _sz=$(stat -c%s "$_logf" 2>/dev/null || wc -c < "$_logf" 2>/dev/null) || _sz=0
+        if [ -n "$_sz" ] && [ "$_sz" -gt 102400 ] 2>/dev/null; then
+            mv -f "${_logf}.1" "${_logf}.2" 2>/dev/null
+            mv -f "$_logf" "${_logf}.1" 2>/dev/null
+        fi
+        echo "[$(date '+%H:%M:%S')] [WEBUI] REQ: $_logq" >> "$_logf" 2>/dev/null ;;
+esac
 
 case "$P" in
     /mode)
@@ -71,6 +81,16 @@ case "$P" in
             bw=* )
                 vals="${Q#bw=}"
                 if bw_set "$vals"; then ok; else bad; fi ;;
+            *) bad ;;
+        esac ;;
+    /battguard)
+        case "$Q" in
+            t=* )
+                v="${Q#t=}"
+                case "$v" in ''|*[!0-9]*) bad ;; *)
+                    if [ "$v" -ge 35 ] 2>/dev/null && [ "$v" -le 60 ] 2>/dev/null; then
+                        setcfg battery_guard_temp "$v"; ok
+                    else bad; fi ;; esac ;;
             *) bad ;;
         esac ;;
     /ping)

@@ -47,6 +47,13 @@ function setDelegated(v) {
     toast(v === '1' ? 'Delegation aktiviert' : 'Delegation deaktiviert');
 }
 
+function applyBattGuard() {
+    var v = Number(document.getElementById('battGuardTemp').value);
+    if (!Number.isInteger(v) || v < 35 || v > 60) { toast('Akku-Guard 35..60°C'); return; }
+    api('/battguard?t=' + v);
+    toast('Akku-Guard → ' + v + '°C');
+}
+
 function parseBwFloors() {
     var r = {gpubw: [0,0,0], llcc: [0,0,0]};
     if (d.gov_bw_gpubw) {
@@ -144,6 +151,9 @@ function render() {
     document.getElementById('vGovProfile').textContent = profName;
 
     document.getElementById('vGpuCaps').textContent = d.gov_gpu_caps || '--';
+
+    var bgi = document.getElementById('battGuardTemp');
+    if (bgi && d.gov_batt_temp && document.activeElement !== bgi) bgi.value = d.gov_batt_temp;
 
     var bw = parseBwFloors();
     for (var i = 0; i < 3; i++) {

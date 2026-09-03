@@ -3,7 +3,14 @@
 MODDIR=${0%/*}
 LOG=$MODDIR/config/service.log
 
-log() { printf '[%s] [SVC] %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOG" 2>/dev/null; }
+_logrot() {
+    local sz
+    sz=$(stat -c%s "$LOG" 2>/dev/null || wc -c < "$LOG" 2>/dev/null) || return 0
+    [ -n "$sz" ] && [ "$sz" -gt 102400 ] 2>/dev/null || return 0
+    mv -f "${LOG}.1" "${LOG}.2" 2>/dev/null
+    mv -f "$LOG" "${LOG}.1" 2>/dev/null
+}
+log() { _logrot; printf '[%s] [SVC] %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOG" 2>/dev/null; }
 
 mkdir -p "$MODDIR/run" "$MODDIR/config" "$MODDIR/webroot" 2>/dev/null
 chmod 755 "$MODDIR/bin/k6a-controller" "$MODDIR/bin/webui-server.sh" "$MODDIR/bin/webui-handler.sh" 2>/dev/null

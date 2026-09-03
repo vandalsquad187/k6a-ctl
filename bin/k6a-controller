@@ -39,7 +39,18 @@ cfg_load() {
     AUTO_BT=$(cfg auto_badazz_temp)
     case "$AUTO_BT" in ''|*[!0-9]*) AUTO_BT=85 ;; *) [ "$AUTO_BT" -lt 70 ] 2>/dev/null && AUTO_BT=70; [ "$AUTO_BT" -gt 95 ] 2>/dev/null && AUTO_BT=95 ;; esac
     AUTO_HYST=$(cfg auto_badazz_hyst); case "$AUTO_HYST" in ''|*[!0-9]*) AUTO_HYST=5 ;; *) [ "$AUTO_HYST" -lt 3 ] 2>/dev/null && AUTO_HYST=3; [ "$AUTO_HYST" -gt 10 ] 2>/dev/null && AUTO_HYST=10 ;; esac
+    BATT_T=$(cfg battery_guard_temp)
+    case "$BATT_T" in ''|*[!0-9]*) BATT_T=45 ;; *) [ "$BATT_T" -lt 35 ] 2>/dev/null && BATT_T=35; [ "$BATT_T" -gt 60 ] 2>/dev/null && BATT_T=60 ;; esac
     CFG_DEBUG=$(cfg debug); [ "$CFG_DEBUG" != "1" ] && CFG_DEBUG=0
+}
+
+# ── battery guard temp sync (kernel node, Build27+) ─────────────────────────
+_sync_batt_guard() {
+    [ "$DELEGATED" = "1" ] || return 0
+    [ -f "$GOV/battery_guard_temp" ] || return 0
+    local cur
+    cur=$(gov_read "battery_guard_temp" 2>/dev/null | tr -d ' \n\r\t')
+    [ "$cur" = "$BATT_T" ] || gov_write "battery_guard_temp" "$BATT_T"
 }
 
 # ── single instance guard ───────────────────────────────────────────────────
@@ -160,6 +171,7 @@ _enter_gaming() {
     if [ "$DELEGATED" = "1" ] && gov_sysfs_exists; then
         gov_write "enable" 1
         _apply_profile "$PROFILE"
+        _sync_batt_guard
         log "-> GAMING (delegated, profile=$PROFILE)"
     else
         cpu_apply "$SILVER_MAX" "$GOLD_MAX"
@@ -180,10 +192,11 @@ _write_data() {
     btpc="$(( btp / 10 )).$(( btp % 10 ))"
 
     # Gov-Status: alles aus /sys/kernel/k6a_gov/status parsen
-    local gv="" gs="" gt="" gte="" gpf="" ghv="" gpc="" gbw="" gbl="" ghe=""
+    local gv="" gs="" gt="" gte="" gpf="" ghv="" gpc="" gbw="" gbl="" ghe="" gbt=""
     if [ "$DELEGATED" = "1" ] && [ -d "$GOV" ]; then
         local _st
         _st=$(cat "$GOV/status" 2>/dev/null)
+        gbt=$(gov_read "battery_guard_temp" 2>/dev/null | tr -d ' \n\r\t')
         gv=$(echo "$_st" | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
         gs=$(echo "$_st" | grep -oE "state=[a-z0-9_]+" | head -1 | cut -d= -f2)
         gt=$(echo "$_st" | grep -oE "temp=[0-9]+" | head -1 | cut -d= -f2)
@@ -219,6 +232,7 @@ gov_gpu_caps=$gpc
 gov_bw_gpubw=$gbw
 gov_bw_llcc=$gbl
 gov_hist=$ghe
+gov_batt_temp=$gbt
 EOF
     mv "${DATA}.tmp" "$DATA"
 }
@@ -252,6 +266,6 @@ while true; do
 
     _write_data "$TEMP_NOW"
     TICK=$(( TICK + 1 ))
-    [ $(( TICK % 60 )) -eq 0 ] && log "hb tick=$TICK state=$STATE temp=${TEMP_NOW} delegated=$DELEGATED"
+    [ $(( TICK % 60 )) -eq 0 ] && { _sync_batt_guard; log "hb tick=$TICK state=$STATE temp=${TEMP_NOW} delegated=$DELEGATED"; }
     sleep $SLEEP
 done

@@ -11,10 +11,17 @@ P6=/sys/devices/system/cpu/cpufreq/policy6
 GOV=/sys/kernel/k6a_gov
 LOG_FILE=${LOG_FILE:-$MODDIR/config/service.log}
 
-log()  { printf '[%s] [INFO] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }
-warn() { printf '[%s] [WARN] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }
-err()  { printf '[%s] [ERROR] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }
-dbg()  { [ "${CFG_DEBUG:-0}" = "1" ] && printf '[%s] [DBG] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }
+_logrot() {
+    local sz
+    sz=$(stat -c%s "$LOG_FILE" 2>/dev/null || wc -c < "$LOG_FILE" 2>/dev/null) || return 0
+    [ -n "$sz" ] && [ "$sz" -gt 102400 ] 2>/dev/null || return 0
+    mv -f "${LOG_FILE}.1" "${LOG_FILE}.2" 2>/dev/null
+    mv -f "$LOG_FILE" "${LOG_FILE}.1" 2>/dev/null
+}
+log()  { _logrot; printf '[%s] [INFO] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }
+warn() { _logrot; printf '[%s] [WARN] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }
+err()  { _logrot; printf '[%s] [ERROR] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }
+dbg()  { [ "${CFG_DEBUG:-0}" = "1" ] && { _logrot; printf '[%s] [DBG] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }; }
 
 r() { cat "$1" 2>/dev/null || echo "0"; }
 w() { printf '%s' "$2" > "$1" 2>/dev/null; }

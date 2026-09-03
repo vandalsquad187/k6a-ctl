@@ -68,6 +68,9 @@ if [ -f "$CONF" ]; then
         ABT=$(grep "^auto_badazz_temp=" "$CONF" | cut -d= -f2 | tr -d ' ')
         [ -n "$ABT" ] && [ "$ABT" -ge 70 ] 2>/dev/null && [ "$ABT" -le 95 ] 2>/dev/null \
             && _pass "auto_badazz_temp=${ABT}°C" || _fail "auto_badazz_temp ungültig: [$ABT]"
+        BGT=$(grep "^battery_guard_temp=" "$CONF" | cut -d= -f2 | tr -d ' ')
+        [ -n "$BGT" ] && [ "$BGT" -ge 35 ] 2>/dev/null && [ "$BGT" -le 60 ] 2>/dev/null \
+            && _pass "battery_guard_temp=${BGT}°C" || _fail "battery_guard_temp ungültig: [$BGT]"
     else
         # Legacy: thresholds in settings.conf
         L2=$(grep "^cd_l2_temp=" "$CONF" | cut -d= -f2); L3=$(grep "^cd_l3_temp=" "$CONF" | cut -d= -f2)
