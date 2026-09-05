@@ -78,7 +78,17 @@ _startup() {
     echo $$ > "$PIDF"
     rm -f "$MODDIR"/run/*.tmp 2>/dev/null
     cfg_load; _cache_thermal_zones; _init_freq_tables
+    _fix_usb_autosuspend
     log "k6a-ctl v1.1.0 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE)"
+}
+
+# ── USB dwc3 autosuspend off (LPM-resume hard-reset workaround) ─────────────
+_fix_usb_autosuspend() {
+    local d
+    for d in /sys/bus/platform/devices/a600000.ssusb/power/control; do
+        [ -f "$d" ] || continue
+        [ "$(cat "$d" 2>/dev/null)" = "on" ] || printf '%s' "on" > "$d" 2>/dev/null
+    done
 }
 
 # ── profile management ──────────────────────────────────────────────────────

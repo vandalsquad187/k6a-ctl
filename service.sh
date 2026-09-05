@@ -14,6 +14,8 @@ log() { _logrot; printf '[%s] [SVC] %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOG" 2
 
 mkdir -p "$MODDIR/run" "$MODDIR/config" "$MODDIR/webroot" 2>/dev/null
 chmod 755 "$MODDIR/bin/k6a-controller" "$MODDIR/bin/webui-server.sh" "$MODDIR/bin/webui-handler.sh" 2>/dev/null
+# USB dwc3 autosuspend off (LPM-resume hard-reset workaround, see controller)
+printf '%s' "on" > /sys/bus/platform/devices/a600000.ssusb/power/control 2>/dev/null
 
 _tries=0
 until [ "$(getprop sys.boot_completed)" = "1" ]; do
