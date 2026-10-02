@@ -6,7 +6,9 @@ ist dieser vorhanden, delegiert k6a-ctl den Thermal-Cooldown an den Kernel; ohne
 fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 
 > ⚠️ Empfohlener Kernel: [vandalsquad187/BadazzKernel](https://github.com/vandalsquad187/BadazzKernel)
-> v4.14.369 **build340**+ (`k6a_gov` v1.4.0 — Cap-/BW-Release-Fixes, `policy_max`, `temp_src`).
+> v4.14.369 **build341**+ (`k6a_gov` v1.5.0 als **Modul**, `CONFIG_K6A_GOV=m`).
+> Build 340+ bringt die Cap-/BW-Release (`policy_max`, `temp_src`), ab 341 wird
+> der Governor per `insmod` geladen und ist ohne Kernel-Flash nachrüstbar.
 > Ältere Kernel laufen, verlieren aber die Live-Cap-/BW-Statuswerte.
 
 ---
@@ -15,6 +17,15 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 
 - **Auto-Delegation** — erkennt `/sys/kernel/k6a_gov/` zur Laufzeit:
   der Kernel übernimmt Cooldown-Enforcement, das Modul Boost/Pinning/Monitoring
+- **Auto-Ladung des Governors** — `service.sh` hängt `k6a_gov.ko` per `insmod`
+  (Suchreihenfolge Modulordner → `/data/adb` → `/system/lib/modules` →
+  `/vendor/lib/modules`) und fällt bei jedem Fehler still auf den Legacy-Cooldown zurück
+- **Version-Lock** — `GOV_KO_VER` in `service.sh` und die `1.5.*`-Erwartung im Controller
+  sind gepaart und vom Gate erzwungen; weicht die `version=` des `.ko` bzw. der
+  geladenen Laufzeit ab, wird nicht geladen (bzw. `rmmod`)
+- **Hash-Status statt Bool** — `hash_state` (0 pending / 1 verified / 2 mismatch /
+  3 nicht geprüft) aus `/sys/kernel/k6a_gov/status`, in `data.txt` und WebUI gespiegelt;
+  `hash_verified` bleibt aus Kompatibilitätsgründen erhalten
 - **Single Authority** — k6a-ctl schreibt ausschließlich `legacy`; im Delegationsmodus
   `legacy=1` (Kernel erzwingt Caps), sonst `legacy=0` (Kernel gibt alle Caps frei).
   Kein konkurrierendes Schreiben von `scaling_max_freq`/`bw_floors` mehr
@@ -45,8 +56,8 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 
 ```
 k6a-ctl/
-├── module.prop              id=k6a-ctl, v1.2.0
-├── service.sh               Boot-Setup + Controller-Watchdog + WebUI-Server-Spawn
+├── module.prop              id=k6a-ctl, v1.3.0
+├── service.sh               k6a_gov.ko laden (Version-Lock) + Watchdog + WebUI-Spawn
 ├── build.sh                 Gate-Pflicht + ZIP-Assembly
 ├── bin/
 │   ├── check_module.sh      Build-Gate: 5 Checks vor jedem Zip
@@ -151,8 +162,10 @@ seit v1.0.6 macht der Kernel bewusst **CPU-only**.
 2. Via KernelSU Next / Magisk flashen
 3. Reboot — Controller + WebUI-Server starten automatisch
 
-> Hinweis: Für die Delegations-Stufe wird BadazzKernel v4.14.369 **build340**+
-> (`CONFIG_K6A_GOV=y`, `k6a_gov` v1.4.0) empfohlen. Ohne ihn läuft der Legacy-Fallback.
+> Hinweis: Für die Delegations-Stufe wird BadazzKernel v4.14.369 **build341**+
+> (`CONFIG_K6A_GOV=m`, `k6a_gov` v1.5.0) empfohlen. Ab 341 liefert das Kernel-ZIP
+> `k6a_gov.ko` nach `/data/adb/k6a_gov.ko`; `service.sh` lädt es beim Boot und
+> weigert sich bei Versionsabweichung. Ohne Governor läuft der Legacy-Fallback.
 > `bin/check_module.sh` ist **Build-Gate, kein Modul-Tool** — `build.sh` lässt sie
 > absichtlich aus der ZIP aus. Manuell prüfen: `sh bin/check_module.sh <Repo>`.
 
@@ -192,16 +205,18 @@ su -c "sed -i 's/^mode=.*/mode=daily/' /data/adb/modules/k6a-ctl/config/settings
 
 ```sh
 tail -f /data/adb/modules/k6a-ctl/config/service.log   # Events + Heartbeat
-cat /data/adb/modules/k6a-ctl/webroot/data.txt          # Live-Werte (gov_* = Build340-Keys)
+cat /data/adb/modules/k6a-ctl/webroot/data.txt          # Live-Werte (gov_* = Build340/341-Keys)
 sh <repo>/bin/check_module.sh .                         # Gate manuell (Repo-Seite, nicht in der ZIP)
 dmesg | grep k6a_gov                                    # Kernel-Seite
+grep k6a_gov /data/adb/modules/k6a-ctl/config/service.log   # insmod-Ergebnis + Version-Lock
+ls -l /data/adb/k6a_gov.ko                              # kam das Modul beim Flashen an?
 ```
 
-Werte-Abgleich nach einem Kernel-Flash (Build 340 erwartet):
+Werte-Abgleich nach einem Kernel-Flash (Build 341 erwartet):
 
 ```sh
-su -c "cat /sys/kernel/k6a_gov/status | grep -E 'version|policy_max|temp_src|temp_valid'"
-#   version=1.4.0
+su -c "cat /sys/kernel/k6a_gov/status | grep -E 'version|hash_state|policy_max|temp_src|temp_valid'"
+#   version=1.5.0  hash_state=1
 #   policy_max=...  state_age_ms=...  temp_src=1  temp_valid=1
 su -c "cat /sys/kernel/k6a_gov/legacy"      # im Delegationsmodus erwartet: 1
 su -c "cat /sys/kernel/k6a_gov/game_pid"    # Spiel gestartet? sonst 0

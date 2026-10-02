@@ -1,4 +1,4 @@
-// k6a-ctl app.js v1.2.0
+// k6a-ctl app.js v1.3.0
 var d = {};
 var _toastT = null;
 
@@ -148,8 +148,14 @@ function render() {
     document.getElementById('vGovState').textContent = (d.gov_state || '--').toUpperCase();
     document.getElementById('vGovThrottle').textContent = d.gov_throttle || '0';
     var hv = document.getElementById('vGovHash');
-    hv.textContent = d.gov_hash === '1' ? '✓ verified' : '✗ mismatch';
-    hv.style.color = d.gov_hash === '1' ? '#4ade80' : '#f87171';
+    if (d.gov_hash_state === '1') { hv.textContent = '✓ verified'; hv.style.color = '#4ade80'; }
+    else if (d.gov_hash_state === '2') { hv.textContent = '✗ mismatch'; hv.style.color = '#f87171'; }
+    else if (d.gov_hash_state === '3') { hv.textContent = '– nicht geprüft'; hv.style.color = '#fbbf24'; }
+    else if (d.gov_hash_state === '0') { hv.textContent = '– pending'; hv.style.color = '#fbbf24'; }
+    else {
+        hv.textContent = d.gov_hash === '1' ? '✓ verified' : '✗ mismatch';
+        hv.style.color = d.gov_hash === '1' ? '#4ade80' : '#f87171';
+    }
 
     var pm = document.getElementById('vGovPolicyMax');
     if (pm) pm.textContent = d.gov_policy_max ? (Math.round(Number(d.gov_policy_max) / 1000) + ' MHz') : '--';

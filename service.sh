@@ -16,6 +16,50 @@ mkdir -p "$MODDIR/run" "$MODDIR/config" "$MODDIR/webroot" 2>/dev/null
 chmod 755 "$MODDIR/bin/k6a-controller" "$MODDIR/bin/webui-server.sh" "$MODDIR/bin/webui-handler.sh" 2>/dev/null
 # USB dwc3 autosuspend - FIXED Badazz Build 68 (08.09.): autosuspend now safe, keep auto
 
+# ── k6a_gov.ko laden (CONFIG_K6A_GOV=m ab Badazz Build 341) ──────────────────
+GOV=/sys/kernel/k6a_gov
+GOV_KO_VER=1.5.0
+
+_load_gov() {
+    if [ -f "$GOV/status" ]; then
+        log "k6a_gov bereits geladen"
+        return 0
+    fi
+    local ko="" kv="" gv="" out rc
+    for ko in "$MODDIR/k6a_gov.ko" /data/adb/k6a_gov.ko \
+              /system/lib/modules/k6a_gov.ko /vendor/lib/modules/k6a_gov.ko; do
+        [ -f "$ko" ] && break
+        ko=""
+    done
+    if [ -z "$ko" ]; then
+        log "WARN k6a_gov.ko nicht gefunden — Legacy-Fallback (Userspace-Cooldown)"
+        return 1
+    fi
+    if command -v strings >/dev/null 2>&1; then
+        kv=$(strings "$ko" 2>/dev/null | grep -E '^version=[0-9]+\.[0-9]+\.[0-9]+$' | head -1 | cut -d= -f2)
+        if [ -n "$kv" ] && [ "$kv" != "$GOV_KO_VER" ]; then
+            log "WARN k6a_gov.ko version=$kv, erwartet $GOV_KO_VER — nicht geladen"
+            return 1
+        fi
+    fi
+    out=$(/system/bin/insmod "$ko" 2>&1)
+    rc=$?
+    if [ "$rc" != "0" ]; then
+        log "WARN insmod $ko fehlgeschlagen rc=$rc: $out"
+        return 1
+    fi
+    sleep 1
+    gv=$(grep -oE 'version=[^ ]*' "$GOV/status" 2>/dev/null | head -1 | cut -d= -f2)
+    if [ "$gv" != "$GOV_KO_VER" ]; then
+        log "WARN k6a_gov runtime version=${gv:-?}, erwartet $GOV_KO_VER — rmmod"
+        /system/bin/rmmod k6a_gov 2>/dev/null
+        return 1
+    fi
+    log "k6a_gov $gv aus $ko geladen"
+    return 0
+}
+_load_gov
+
 _tries=0
 until [ "$(getprop sys.boot_completed)" = "1" ]; do
     sleep 3

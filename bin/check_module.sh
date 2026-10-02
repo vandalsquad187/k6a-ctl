@@ -87,6 +87,26 @@ if [ -f "$CONF" ]; then
     case "$m" in gaming|daily) _pass "mode=$m" ;; *) _fail "mode ungültig: [$m]" ;; esac
 fi
 
+# ── 5b/5 Version-Lock: service.sh (insmod) ↔ controller (wartet auf) ─────────
+echo "[5b] Version-Lock k6a_gov"
+GKV=$(grep "^GOV_KO_VER=" "$MOD/service.sh" 2>/dev/null | cut -d= -f2 | tr -d ' ')
+if echo "$GKV" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    _pass "service.sh GOV_KO_VER=$GKV"
+else
+    _fail "service.sh GOV_KO_VER fehlt/ungültig: [$GKV]"
+fi
+GMM=${GKV%.*}
+if [ -n "$GMM" ] && grep -q "${GMM}\.\*" "$MOD/bin/k6a-controller" 2>/dev/null; then
+    _pass "controller wartet auf k6a_gov ${GMM}.*"
+else
+    _fail "Version-Lock inkonsistent: controller wartet nicht auf ${GMM:-?}.*"
+fi
+if grep -q '^GOV_KO_VER=' "$MOD/service.sh" 2>/dev/null && grep -q 'insmod' "$MOD/service.sh"; then
+    _pass "service.sh lädt k6a_gov.ko per insmod"
+else
+    _fail "service.sh lädt kein k6a_gov.ko (insmod fehlt)"
+fi
+
 echo "════════════════════════════════════"
 if [ "$FAIL" = "0" ]; then echo " GATE OK — $WARN warn(s)"; exit 0
 else echo " GATE FAILED — $FAIL err(s), $WARN warn(s)"; exit 1; fi

@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# k6a-ctl controller v1.2.0 — delegated thermal management
+# k6a-ctl controller v1.3.0 — delegated thermal management
 # states: DAILY | GAMING
 # tick-sleep: daily=5s gaming=1s
 
@@ -110,15 +110,15 @@ _startup() {
     rm -f "$MODDIR"/run/*.tmp 2>/dev/null
     cfg_load; _cache_thermal_zones; _init_freq_tables
     _fix_usb_autosuspend
-    log "k6a-ctl v1.2.0 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD)"
+    log "k6a-ctl v1.3.0 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
         log "k6a_gov ${gv:-unbekannt} legacy=$(gov_read "legacy" 2>/dev/null | tr -d ' \n\r\t')"
         case "$gv" in
-            1.4.*) ;;
-            "") warn "k6a_gov status ohne version — Build 340 (1.4.0) erwartet" ;;
-            *) warn "k6a_gov $gv — Build 340 (1.4.0) bringt Cap-/BW-Release und die Keys policy_max/temp_src" ;;
+            1.5.*) ;;
+            "") warn "k6a_gov status ohne version — Build 341 (1.5.0) erwartet" ;;
+            *) warn "k6a_gov $gv — Build 341 (1.5.0) bringt CONFIG_K6A_GOV=m, hash_state und den LINUX_VERSION_CODE-Fix" ;;
         esac
     else
         warn "kein /sys/kernel/k6a_gov — reiner Legacy-Betrieb"
@@ -241,7 +241,7 @@ _write_data() {
     btpc="$(( btp / 10 )).$(( btp % 10 ))"
 
     # Gov-Status: alles aus /sys/kernel/k6a_gov/status parsen
-    local gv="" gs="" gt="" gte="" gpf="" ghv="" gpc="" gbw="" gbl="" ghe="" gbt=""
+    local gv="" gs="" gt="" gte="" gpf="" ghv="" ghs="" gpc="" gbw="" gbl="" ghe="" gbt=""
     local gpm="" gas="" gts="" gtv="" gbg="" gpid=""
     if [ "$DELEGATED" = "1" ] && [ -d "$GOV" ]; then
         local _st
@@ -253,6 +253,7 @@ _write_data() {
         gte=$(echo "$_st" | grep -oE "throttle_events=[0-9]+" | head -1 | cut -d= -f2)
         gpf=$(gov_read "profile" 2>/dev/null | tr -d '\n')
         ghv=$(echo "$_st" | grep -oE "hash_verified=[01]" | head -1 | cut -d= -f2)
+        ghs=$(echo "$_st" | grep -oE "hash_state=[0-3]" | head -1 | cut -d= -f2)
         gpc=$(gov_read "gpu_caps" 2>/dev/null | tr -d '\n')
         gbw=$(echo "$_st" | grep -oE "bw_floor_gpubw=[0-9 ]+" | head -1 | sed 's/bw_floor_gpubw=/gpubw /')
         gbl=$(echo "$_st" | grep -oE "bw_floor_llcc=[0-9 ]+" | head -1 | sed 's/bw_floor_llcc=/llcc /')
@@ -284,6 +285,7 @@ gov_temp=$gt
 gov_throttle=$gte
 gov_profile=$gpf
 gov_hash=$ghv
+gov_hash_state=$ghs
 gov_gpu_caps=$gpc
 gov_bw_gpubw=$gbw
 gov_bw_llcc=$gbl
