@@ -107,6 +107,19 @@ else
     _fail "service.sh lädt kein k6a_gov.ko (insmod fehlt)"
 fi
 
+# ── 5c/5 SELinux: sepolicy.rule muss für ksud parsbar sein ─────────────────
+echo "[5c] sepolicy.rule (SELinux)"
+SP="$MOD/sepolicy.rule"
+if [ ! -f "$SP" ]; then
+    _fail "sepolicy.rule fehlt — hash_state bleibt 3 (kernel darf sysfs nicht lesen)"
+elif ! grep -q 'allow kernel sysfs file {read open getattr}' "$SP"; then
+    _fail "sepolicy.rule: 'allow kernel sysfs file {read open getattr}' fehlt"
+elif grep -q ':' "$SP"; then
+    _fail "sepolicy.rule: Doppelpunkt-Syntax — ksud parst nur 'src tgt class {perms}'"
+else
+    _pass "sepolicy.rule: kernel → sysfs file/dir"
+fi
+
 echo "════════════════════════════════════"
 if [ "$FAIL" = "0" ]; then echo " GATE OK — $WARN warn(s)"; exit 0
 else echo " GATE FAILED — $FAIL err(s), $WARN warn(s)"; exit 1; fi

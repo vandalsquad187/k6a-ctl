@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# k6a-ctl controller v1.3.0 — delegated thermal management
+# k6a-ctl controller v1.3.1 — delegated thermal management
 # states: DAILY | GAMING
 # tick-sleep: daily=5s gaming=1s
 
@@ -110,7 +110,7 @@ _startup() {
     rm -f "$MODDIR"/run/*.tmp 2>/dev/null
     cfg_load; _cache_thermal_zones; _init_freq_tables
     _fix_usb_autosuspend
-    log "k6a-ctl v1.3.0 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD)"
+    log "k6a-ctl v1.3.1 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)

@@ -26,6 +26,10 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 - **Hash-Status statt Bool** — `hash_state` (0 pending / 1 verified / 2 mismatch /
   3 nicht geprüft) aus `/sys/kernel/k6a_gov/status`, in `data.txt` und WebUI gespiegelt;
   `hash_verified` bleibt aus Kompatibilitätsgründen erhalten
+- **SELinux-Freigabe für die Hash-Prüfung** — `sepolicy.rule` gewährt
+  `kernel → sysfs {dir,file}` die Leserechte. Ohne sie ist der `k6a_gov`-Kthread
+  (SID `u:r:kernel:s0`) an jedem sysfs-Open gescheitert und `hash_state` blieb
+  dauerhaft `3`; `service.sh` selbst (`u:r:ksu:s0`) darf sysfs ohnehin lesen
 - **Single Authority** — k6a-ctl schreibt ausschließlich `legacy`; im Delegationsmodus
   `legacy=1` (Kernel erzwingt Caps), sonst `legacy=0` (Kernel gibt alle Caps frei).
   Kein konkurrierendes Schreiben von `scaling_max_freq`/`bw_floors` mehr
@@ -56,7 +60,7 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 
 ```
 k6a-ctl/
-├── module.prop              id=k6a-ctl, v1.3.0
+├── module.prop              id=k6a-ctl, v1.3.1
 ├── service.sh               k6a_gov.ko laden (Version-Lock) + Watchdog + WebUI-Spawn
 ├── build.sh                 Gate-Pflicht + ZIP-Assembly
 ├── bin/
@@ -221,6 +225,13 @@ su -c "cat /sys/kernel/k6a_gov/status | grep -E 'version|hash_state|policy_max|t
 su -c "cat /sys/kernel/k6a_gov/legacy"      # im Delegationsmodus erwartet: 1
 su -c "cat /sys/kernel/k6a_gov/game_pid"    # Spiel gestartet? sonst 0
 ```
+
+`hash_state=3` („nicht geprüft") statt `1`: die Hash-Prüfung läuft im Kernel-Thread
+`k6a_gov`, dessen SELinux-Domäne `u:r:kernel:s0` **keinen** Zugriff auf sysfs-Dateien hat
+(`kernel → sysfs:file allowed = 0`). `sepolicy.rule` im Modulordner behebt das beim nächsten
+Boot — nach dem Anwenden der Regel:
+`echo 'u:r:kernel:s0 u:object_r:sysfs:s0 6' > /sys/fs/selinux/access; cat /sys/fs/selinux/access`
+muss `40012` statt `0` liefern (read+open+getattr).
 
 Bekannte Falle (hier gefixt, trotzdem merken): **mksh definiert `alias r='fc -e -'`**.
 Eine Library, die eine Funktion `r()` ohne vorheriges `unalias r` definiert, wird
