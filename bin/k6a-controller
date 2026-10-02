@@ -118,7 +118,7 @@ _startup() {
         case "$gv" in
             1.5.*) ;;
             "") warn "k6a_gov status ohne version — Build 341 (1.5.0) erwartet" ;;
-            *) warn "k6a_gov $gv — Build 341 (1.5.0) bringt CONFIG_K6A_GOV=m, hash_state und den LINUX_VERSION_CODE-Fix" ;;
+            *) warn "k6a_gov $gv — ab Build 341 (1.5.0): CONFIG_K6A_GOV=m als Modul plus hash_state" ;;
         esac
     else
         warn "kein /sys/kernel/k6a_gov — reiner Legacy-Betrieb"
