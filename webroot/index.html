@@ -47,8 +47,16 @@
     <div class="row"><span class="label">State</span><span class="val" id="vGovState">--</span></div>
     <div class="row"><span class="label">Profil</span><span class="val" id="vGovProfile">--</span></div>
     <div class="row"><span class="label">Throttle Events</span><span class="val" id="vGovThrottle">0</span></div>
+    <div class="row"><span class="label">Gold Cap (aktiv)</span><span class="val" id="vGovPolicyMax">--</span></div>
+    <div class="row"><span class="label">State Alter</span><span class="val" id="vGovStateAge">--</span></div>
+    <div class="row"><span class="label">Temp-Quelle</span><span class="val" id="vGovTempSrc">--</span></div>
     <div class="row"><span class="label">Build Hash</span><span class="val" id="vGovHash">--</span></div>
     <div class="row"><span class="label">GPU Caps (L2/L3/L4)</span><span class="val" id="vGpuCaps">--</span></div>
+    <div class="row">
+        <span class="label">Akku-Guard</span>
+        <label class="toggle"><input type="checkbox" id="battGuardToggle" onchange="setBattGuardEn(this.checked)">
+        <span class="slider"></span></label>
+    </div>
     <div class="row"><span class="label">Akku-Guard (°C)</span><span class="val"><input type="number" id="battGuardTemp" class="bw-input" style="width:70px" min="35" max="60" value="45"> <button class="chip" onclick="applyBattGuard()">Set</button></span></div>
 </div>
 

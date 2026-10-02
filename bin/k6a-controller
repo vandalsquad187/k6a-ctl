@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# k6a-ctl controller v1.1.0 — delegated thermal management
+# k6a-ctl controller v1.2.0 — delegated thermal management
 # states: DAILY | GAMING
 # tick-sleep: daily=5s gaming=1s
 
@@ -41,16 +41,47 @@ cfg_load() {
     AUTO_HYST=$(cfg auto_badazz_hyst); case "$AUTO_HYST" in ''|*[!0-9]*) AUTO_HYST=5 ;; *) [ "$AUTO_HYST" -lt 3 ] 2>/dev/null && AUTO_HYST=3; [ "$AUTO_HYST" -gt 10 ] 2>/dev/null && AUTO_HYST=10 ;; esac
     BATT_T=$(cfg battery_guard_temp)
     case "$BATT_T" in ''|*[!0-9]*) BATT_T=45 ;; *) [ "$BATT_T" -lt 35 ] 2>/dev/null && BATT_T=35; [ "$BATT_T" -gt 60 ] 2>/dev/null && BATT_T=60 ;; esac
+    BATT_GUARD=$(cfg battery_guard); [ "$BATT_GUARD" != "off" ] && BATT_GUARD="on"
     CFG_DEBUG=$(cfg debug); [ "$CFG_DEBUG" != "1" ] && CFG_DEBUG=0
 }
 
-# ── battery guard temp sync (kernel node, Build27+) ─────────────────────────
+# ── battery guard sync (kernel nodes battery_guard + battery_guard_temp) ─────
 _sync_batt_guard() {
+    local cur want en
     [ "$DELEGATED" = "1" ] || return 0
-    [ -f "$GOV/battery_guard_temp" ] || return 0
-    local cur
-    cur=$(gov_read "battery_guard_temp" 2>/dev/null | tr -d ' \n\r\t')
-    [ "$cur" = "$BATT_T" ] || gov_write "battery_guard_temp" "$BATT_T"
+    gov_sysfs_exists || return 0
+    if [ -f "$GOV/battery_guard_temp" ]; then
+        cur=$(gov_read "battery_guard_temp" 2>/dev/null | tr -d ' \n\r\t')
+        [ "$cur" = "$BATT_T" ] || gov_write "battery_guard_temp" "$BATT_T"
+    fi
+    [ -f "$GOV/battery_guard" ] || return 0
+    want=0; [ "$BATT_GUARD" = "on" ] && want=1
+    en=$(gov_read "battery_guard" 2>/dev/null | tr -d ' \n\r\t')
+    [ "$en" = "$want" ] || gov_write "battery_guard" "$want"
+}
+
+# ── single thermal authority: k6a-ctl owns `legacy`, the kernel owns everything else
+_LEGACY_SYNCED=""
+_sync_legacy() {
+    local want
+    gov_sysfs_exists || return 0
+    want=1; [ "$DELEGATED" = "1" ] || want=0
+    [ "$_LEGACY_SYNCED" = "$want" ] && return 0
+    gov_write "legacy" "$want" || return 0
+    _LEGACY_SYNCED=$want
+    log "legacy → $want (delegated=$DELEGATED)"
+}
+
+# ── game pid: stored/echoed by the kernel, never acted upon there ────────────
+_GAME_PID=""
+_set_game_pid() { # $1=pid oder leer
+    local p
+    p="${1:-0}"
+    [ "$DELEGATED" = "1" ] || return 0
+    gov_sysfs_exists || return 0
+    [ "$_GAME_PID" = "$p" ] && return 0
+    gov_write "game_pid" "$p" || return 0
+    _GAME_PID=$p
 }
 
 # ── single instance guard ───────────────────────────────────────────────────
@@ -79,7 +110,19 @@ _startup() {
     rm -f "$MODDIR"/run/*.tmp 2>/dev/null
     cfg_load; _cache_thermal_zones; _init_freq_tables
     _fix_usb_autosuspend
-    log "k6a-ctl v1.1.0 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE)"
+    log "k6a-ctl v1.2.0 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD)"
+    if gov_sysfs_exists; then
+        local gv
+        gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
+        log "k6a_gov ${gv:-unbekannt} legacy=$(gov_read "legacy" 2>/dev/null | tr -d ' \n\r\t')"
+        case "$gv" in
+            1.4.*) ;;
+            "") warn "k6a_gov status ohne version — Build 340 (1.4.0) erwartet" ;;
+            *) warn "k6a_gov $gv — Build 340 (1.4.0) bringt Cap-/BW-Release und die Keys policy_max/temp_src" ;;
+        esac
+    else
+        warn "kein /sys/kernel/k6a_gov — reiner Legacy-Betrieb"
+    fi
 }
 
 # ── USB dwc3 autosuspend - FIXED Badazz Build 68 (08.09.): keep auto (was LPM workaround) ───
@@ -139,6 +182,7 @@ _apply_schedutil() { # $1=gaming|daily
 _apply_gaming_userspace() {
     _apply_schedutil gaming
     local pid; pid=$(pidof "$PKG" 2>/dev/null | awk '{print $1}')
+    _set_game_pid "$pid"
     if [ -n "$pid" ]; then
         for tid in /proc/"$pid"/task/*/; do
             tid=${tid%/}; tid=${tid##*/}
@@ -159,6 +203,7 @@ _apply_gaming_userspace() {
 # ── state transitions ───────────────────────────────────────────────────────
 _enter_daily() {
     STATE="DAILY"; _GAMING_APPLIED=0; IDLE=0
+    _set_game_pid ""
     if [ "$DELEGATED" = "1" ] && gov_sysfs_exists; then
         gov_write "enable" 0
         _apply_profile "gaming"
@@ -197,6 +242,7 @@ _write_data() {
 
     # Gov-Status: alles aus /sys/kernel/k6a_gov/status parsen
     local gv="" gs="" gt="" gte="" gpf="" ghv="" gpc="" gbw="" gbl="" ghe="" gbt=""
+    local gpm="" gas="" gts="" gtv="" gbg="" gpid=""
     if [ "$DELEGATED" = "1" ] && [ -d "$GOV" ]; then
         local _st
         _st=$(cat "$GOV/status" 2>/dev/null)
@@ -211,6 +257,12 @@ _write_data() {
         gbw=$(echo "$_st" | grep -oE "bw_floor_gpubw=[0-9 ]+" | head -1 | sed 's/bw_floor_gpubw=/gpubw /')
         gbl=$(echo "$_st" | grep -oE "bw_floor_llcc=[0-9 ]+" | head -1 | sed 's/bw_floor_llcc=/llcc /')
         ghe=$(echo "$_st" | sed -n 's/^hist=//p')
+        gpm=$(echo "$_st" | grep -oE "policy_max=[0-9]+" | head -1 | cut -d= -f2)
+        gas=$(echo "$_st" | grep -oE "state_age_ms=[0-9]+" | head -1 | cut -d= -f2)
+        gts=$(echo "$_st" | grep -oE "temp_src=[0-9]+" | head -1 | cut -d= -f2)
+        gtv=$(echo "$_st" | grep -oE "temp_valid=[01]" | head -1 | cut -d= -f2)
+        gbg=$(gov_read "battery_guard" 2>/dev/null | tr -d ' \n\r\t')
+        gpid=$(gov_read "game_pid" 2>/dev/null | tr -d ' \n\r\t')
     fi
 
     cat > "${DATA}.tmp" << EOF
@@ -237,6 +289,12 @@ gov_bw_gpubw=$gbw
 gov_bw_llcc=$gbl
 gov_hist=$ghe
 gov_batt_temp=$gbt
+gov_policy_max=$gpm
+gov_state_age=$gas
+gov_temp_src=$gts
+gov_temp_valid=$gtv
+gov_batt_guard=$gbg
+gov_game_pid=$gpid
 EOF
     mv "${DATA}.tmp" "$DATA"
 }
@@ -252,6 +310,7 @@ while true; do
     echo $$ > "$PIDF"
 
     cfg_load
+    _sync_legacy
     TEMP_NOW=$(read_temp)
 
     if [ "$MODE" = "gaming" ]; then

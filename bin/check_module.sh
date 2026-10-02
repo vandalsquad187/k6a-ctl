@@ -71,6 +71,8 @@ if [ -f "$CONF" ]; then
         BGT=$(grep "^battery_guard_temp=" "$CONF" | cut -d= -f2 | tr -d ' ')
         [ -n "$BGT" ] && [ "$BGT" -ge 35 ] 2>/dev/null && [ "$BGT" -le 60 ] 2>/dev/null \
             && _pass "battery_guard_temp=${BGT}°C" || _fail "battery_guard_temp ungültig: [$BGT]"
+        BG=$(grep "^battery_guard=" "$CONF" | cut -d= -f2 | tr -d ' ')
+        case "$BG" in on|off) _pass "battery_guard=$BG" ;; *) _fail "battery_guard ungültig: [$BG]" ;; esac
     else
         # Legacy: thresholds in settings.conf
         L2=$(grep "^cd_l2_temp=" "$CONF" | cut -d= -f2); L3=$(grep "^cd_l3_temp=" "$CONF" | cut -d= -f2)

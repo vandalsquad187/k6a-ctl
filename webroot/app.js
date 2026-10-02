@@ -1,4 +1,4 @@
-// k6a-ctl app.js v1.1.0
+// k6a-ctl app.js v1.2.0
 var d = {};
 var _toastT = null;
 
@@ -54,6 +54,11 @@ function applyBattGuard() {
     toast('Akku-Guard → ' + v + '°C');
 }
 
+function setBattGuardEn(v) {
+    api('/battguard?e=' + (v ? '1' : '0'));
+    toast(v ? 'Akku-Guard an' : 'Akku-Guard aus');
+}
+
 function parseBwFloors() {
     var r = {gpubw: [0,0,0], llcc: [0,0,0]};
     if (d.gov_bw_gpubw) {
@@ -68,28 +73,28 @@ function parseBwFloors() {
 }
 
 function applyBwFloors() {
-    var vals = [];
+    var g = [], l = [];
     for (var i = 0; i < 3; i++) {
-        var a = document.getElementById('bw_gpubw_' + i).value;
-        var b = document.getElementById('bw_llcc_' + i).value;
-        var na = Number(a), nb = Number(b);
+        var na = Number(document.getElementById('bw_gpubw_' + i).value);
+        var nb = Number(document.getElementById('bw_llcc_' + i).value);
         if (!Number.isInteger(na) || na < 0 || na > 20000) { toast('GPU-BW L' + (i+2) + ' 0..20000'); return; }
         if (!Number.isInteger(nb) || nb < 0 || nb > 20000) { toast('LLCC L' + (i+2) + ' 0..20000'); return; }
-        vals.push(String(na));
-        vals.push(String(nb));
+        g.push(String(na));
+        l.push(String(nb));
     }
-    var path = '/bw_floors?bw=' + vals.join('_');
+    var path = '/bw_floors?bw=' + g.concat(l).join('_');
     new Image().src = 'http://127.0.0.1:8767' + path + '&t=' + Date.now();
     toast('BW-Floors gesendet');
     setTimeout(fetchData, 800);
 }
 
 function resetBwFloors() {
-    var defaults = [2000, 0, 1500, 4000, 1000, 3000];
+    var dg = [4000, 3000, 1500], dl = [0, 4000, 3000];
     for (var i = 0; i < 3; i++) {
-        document.getElementById('bw_gpubw_' + i).value = defaults[i*2];
-        document.getElementById('bw_llcc_' + i).value = defaults[i*2+1];
+        document.getElementById('bw_gpubw_' + i).value = dg[i];
+        document.getElementById('bw_llcc_' + i).value = dl[i];
     }
+    toast('BW-Floors auf gaming-Profil zurückgesetzt');
 }
 
 function parseHist(raw) {
@@ -145,6 +150,22 @@ function render() {
     var hv = document.getElementById('vGovHash');
     hv.textContent = d.gov_hash === '1' ? '✓ verified' : '✗ mismatch';
     hv.style.color = d.gov_hash === '1' ? '#4ade80' : '#f87171';
+
+    var pm = document.getElementById('vGovPolicyMax');
+    if (pm) pm.textContent = d.gov_policy_max ? (Math.round(Number(d.gov_policy_max) / 1000) + ' MHz') : '--';
+
+    var sa = document.getElementById('vGovStateAge');
+    if (sa) sa.textContent = d.gov_state_age ? (Math.round(Number(d.gov_state_age) / 1000) + ' s') : '--';
+
+    var ts = document.getElementById('vGovTempSrc');
+    if (ts) {
+        var tsNames = {'0':'—','1':'Gold cpu-1-*','2':'Silver cpu-0-*','3':'xo-therm','4':'soc-therm','5':'thermal_zone0'};
+        if (d.gov_temp_valid === '0') { ts.textContent = '✗ keine Quelle (State gehalten)'; ts.style.color = '#f87171'; }
+        else { ts.textContent = tsNames[d.gov_temp_src] || '--'; ts.style.color = ''; }
+    }
+
+    var bge = document.getElementById('battGuardToggle');
+    if (bge && d.gov_batt_guard !== undefined) bge.checked = d.gov_batt_guard === '1';
 
     var profNames = {'1':'gaming','2':'battery','3':'badazz','5':'badazz_safe'};
     var profName = profNames[d.gov_profile] || d.gov_profile || '--';

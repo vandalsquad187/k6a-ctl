@@ -5,7 +5,9 @@ Paart sich mit dem In-Kernel-Governor [`k6a_gov`](https://github.com/vandalsquad
 ist dieser vorhanden, delegiert k6a-ctl den Thermal-Cooldown an den Kernel; ohne ihn
 fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 
-> ⚠️ Empfohlener Kernel: [vandalsquad187/BadazzKernel](https://github.com/vandalsquad187/BadazzKernel) v1.0.8+
+> ⚠️ Empfohlener Kernel: [vandalsquad187/BadazzKernel](https://github.com/vandalsquad187/BadazzKernel)
+> v4.14.369 **build340**+ (`k6a_gov` v1.4.0 — Cap-/BW-Release-Fixes, `policy_max`, `temp_src`).
+> Ältere Kernel laufen, verlieren aber die Live-Cap-/BW-Statuswerte.
 
 ---
 
@@ -13,6 +15,15 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 
 - **Auto-Delegation** — erkennt `/sys/kernel/k6a_gov/` zur Laufzeit:
   der Kernel übernimmt Cooldown-Enforcement, das Modul Boost/Pinning/Monitoring
+- **Single Authority** — k6a-ctl schreibt ausschließlich `legacy`; im Delegationsmodus
+  `legacy=1` (Kernel erzwingt Caps), sonst `legacy=0` (Kernel gibt alle Caps frei).
+  Kein konkurrierendes Schreiben von `scaling_max_freq`/`bw_floors` mehr
+- **Akku-Guard Toggle** — `/battguard?e=0|1` + `battery_guard` in der Config, Schwelle
+  via `/battguard?t=35..60` (beides `settings.conf`-hot-reload, kein Flash)
+- **Korrekte BW-Floor-Reihenfolge** — Payload ist jetzt `gpubw_L2 L3 L4 llcc_L2 L3 L4`,
+  exakt wie der Kernel sie parst (`sscanf("%u %u %u %u %u %u")`)
+- **Live-Status Build 340** — `policy_max`, `state_age_ms`, `temp_src`, `temp_valid`,
+  `game_pid`, `battery_guard` aus dem Kernel gelesen und in `data.txt` / WebUI gespiegelt
 - **Legacy-Fallback** — vollständige Userspace-State-Machine (CD_L2/L3/L4 + Recover)
   mit adaptiver Hysterese, falls kein In-Kernel-Governor vorhanden ist
 - **Dynamische Clock-Tables** — liest `scaling_available_frequencies` zur Laufzeit,
@@ -24,6 +35,7 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 - **Gesplittete WebUI** — `index.html` + `app.js` + `style.css`, kein Monolith
 - **Build-Gate** — `check_module.sh` verweigert kaputte Zips: Shell-Syntax, JS-Duplikat-Scan,
   Bracket-Balance, Thermal-Zonen-Dryrun, Config-Sanity, mksh-`r`-Alias-Schattenprüfung
+  *(prüft vor dem Packen — `build.sh` schließt die Datei bewusst aus der ZIP aus)*
 - **Single-Instance-Lock** — atomares mkdir-Lock mit crash-sicherer Stale-Recovery
 - **Akku-freundliches Tick-Raster** — DAILY: 5s / GAMING: 1s / COOLDOWN: 2s
 
@@ -33,7 +45,7 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 
 ```
 k6a-ctl/
-├── module.prop              id=k6a-ctl, v1.0.0
+├── module.prop              id=k6a-ctl, v1.2.0
 ├── service.sh               Boot-Setup + Controller-Watchdog + WebUI-Server-Spawn
 ├── build.sh                 Gate-Pflicht + ZIP-Assembly
 ├── bin/
@@ -108,7 +120,11 @@ Der In-Kernel-Governor und dieses Modul teilen sich die Arbeit nach dem Prinzip
 | Thermal-Trips raise/disable | ✔ (v1.0.8+) | nur im Legacy-Fallback |
 | Cooldown L2-L4 State Machine | ✔ (250ms-Kthread, Hz-basiert) | Fallback + Spiegel |
 | GPU thermal floor | – (bewusst entfernt: Hard-Hang-Verdächtiger) | – |
-| CPU max enforcement während CD | ✔ cpufreq-notifier | identische % -Caps (Sicherheitsnetz) |
+| CPU max enforcement während CD | ✔ cpufreq-notifier | **nur im Legacy-Modus** (Sicherheitsnetz) |
+| BW-Floors (`gpubw`/`llcc`) | ✔ `bw_floors` (Build 340 release-fähig) | schreibt nur im Legacy-Modus |
+| `legacy` (Single Authority) | ✔ | **✔ einziger Schreiber** |
+| `battery_guard` / `_temp` | ✔ (Eingreifen bei 45 °C, default **aus**) | schreibt Config-Wert |
+| `game_pid` | speichert/echoed, wirkt nie darauf | ✔ `pidof $game_pkg` |
 | OFF→GAMING Aktivierung | ✔ (v1.0.5+) | schreibt nur enable/profile |
 | Input-Boost + Schedutil-Tunables | – | ✔ einmalig pro Moduswechsel |
 | RenderThread-Pinning (taskset/chrt) | – (braucht PID/comm-Scan) | ✔ alle 5 Ticks in GAMING |
@@ -135,8 +151,10 @@ seit v1.0.6 macht der Kernel bewusst **CPU-only**.
 2. Via KernelSU Next / Magisk flashen
 3. Reboot — Controller + WebUI-Server starten automatisch
 
-> Hinweis: Für die Delegations-Stufe wird BadazzKernel mit `CONFIG_K6A_GOV=y`
-> (v1.0.8+, Celsius-Thresholds) empfohlen. Ohne ihn läuft der Legacy-Fallback.
+> Hinweis: Für die Delegations-Stufe wird BadazzKernel v4.14.369 **build340**+
+> (`CONFIG_K6A_GOV=y`, `k6a_gov` v1.4.0) empfohlen. Ohne ihn läuft der Legacy-Fallback.
+> `bin/check_module.sh` ist **Build-Gate, kein Modul-Tool** — `build.sh` lässt sie
+> absichtlich aus der ZIP aus. Manuell prüfen: `sh bin/check_module.sh <Repo>`.
 
 ## Konfiguration
 
@@ -146,7 +164,10 @@ seit v1.0.6 macht der Kernel bewusst **CPU-only**.
 |-----|---------|-----------|
 | `mode` | `gaming` | `gaming` / `daily` |
 | `thermal_protect` | `on` | `on` / `off` |
+| `delegated` | `1` | `1` = Kernel-Governor erzwingt (`legacy=1`), `0` = reines Userspace (`legacy=0`) |
 | `game_pkg` | CODM | Package für Thread-Pinning |
+| `battery_guard` | `on` | Akku-Guard an/aus → `/sys/kernel/k6a_gov/battery_guard` (0/1) |
+| `battery_guard_temp` | 45 | Akku-Guard-Schwelle (35–60 °C) |
 | `cd_l2_temp` … `cd_l4_temp` | 80/82/88 | Cooldown-Eingriffe (°C) |
 | `cd_recover` | 76 | Recover unterhalb (°C) |
 | `hysteresis_fast` / `_normal` | 3/10 | Dwell-Zyklen |
@@ -159,6 +180,10 @@ seit v1.0.6 macht der Kernel bewusst **CPU-only**.
 # Mode via localhost-endpoint
 printf 'GET /mode?m=gaming HTTP/1.0\r\n\r\n' | nc 127.0.0.1 8767
 
+# Akku-Guard: Schwelle 35..60 °C bzw. an/aus
+printf 'GET /battguard?t=48 HTTP/1.0\r\n\r\n' | nc 127.0.0.1 8767
+printf 'GET /battguard?e=0 HTTP/1.0\r\n\r\n' | nc 127.0.0.1 8767
+
 # oder direkt in der config
 su -c "sed -i 's/^mode=.*/mode=daily/' /data/adb/modules/k6a-ctl/config/settings.conf"
 ```
@@ -167,9 +192,19 @@ su -c "sed -i 's/^mode=.*/mode=daily/' /data/adb/modules/k6a-ctl/config/settings
 
 ```sh
 tail -f /data/adb/modules/k6a-ctl/config/service.log   # Events + Heartbeat
-cat /data/adb/modules/k6a-ctl/webroot/data.txt          # Live-Werte
-sh /data/adb/modules/k6a-ctl/bin/check_module.sh .      # Gate manuell
+cat /data/adb/modules/k6a-ctl/webroot/data.txt          # Live-Werte (gov_* = Build340-Keys)
+sh <repo>/bin/check_module.sh .                         # Gate manuell (Repo-Seite, nicht in der ZIP)
 dmesg | grep k6a_gov                                    # Kernel-Seite
+```
+
+Werte-Abgleich nach einem Kernel-Flash (Build 340 erwartet):
+
+```sh
+su -c "cat /sys/kernel/k6a_gov/status | grep -E 'version|policy_max|temp_src|temp_valid'"
+#   version=1.4.0
+#   policy_max=...  state_age_ms=...  temp_src=1  temp_valid=1
+su -c "cat /sys/kernel/k6a_gov/legacy"      # im Delegationsmodus erwartet: 1
+su -c "cat /sys/kernel/k6a_gov/game_pid"    # Spiel gestartet? sonst 0
 ```
 
 Bekannte Falle (hier gefixt, trotzdem merken): **mksh definiert `alias r='fc -e -'`**.

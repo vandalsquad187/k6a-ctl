@@ -91,6 +91,8 @@ case "$P" in
                     if [ "$v" -ge 35 ] 2>/dev/null && [ "$v" -le 60 ] 2>/dev/null; then
                         setcfg battery_guard_temp "$v"; ok
                     else bad; fi ;; esac ;;
+            e=1) setcfg battery_guard on; ok ;;
+            e=0) setcfg battery_guard off; ok ;;
             *) bad ;;
         esac ;;
     /ping)
