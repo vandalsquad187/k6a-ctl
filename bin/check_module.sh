@@ -12,14 +12,14 @@ echo "════════════════════════�
 echo " k6a-ctl Gate | Modul: $MOD"
 echo "════════════════════════════════════"
 
-# ── 1/5 Shell-Syntax ────────────────────────────────────────────────────────
+# ── 1/6 Shell-Syntax ────────────────────────────────────────────────────────
 echo "[1] Shell-Syntax"
 for f in "$MOD"/service.sh "$MOD"/bin/*.sh "$MOD"/bin/k6a-controller; do
     [ -f "$f" ] || continue
     if sh -n "$f" 2>/dev/null; then _pass "$(basename "$f")"; else _fail "$(basename "$f") Syntaxfehler"; fi
 done
 
-# ── 2/5 r-Alias-Schatten (mksh: alias r='fc -e -' schlägt Funktion!) ───────
+# ── 2/6 r-Alias-Schatten (mksh: alias r='fc -e -' schlägt Funktion!) ───────
 echo "[2] Alias-Falle"
 for lib in "$MOD"/bin/k6a-lib.sh "$MOD"/bin/*.sh; do
     [ -f "$lib" ] || continue
@@ -29,7 +29,7 @@ for lib in "$MOD"/bin/k6a-lib.sh "$MOD"/bin/*.sh; do
 done
 _pass "alias-check fertig"
 
-# ── 3/5 JS: dup const/let, Brackets ────────────────────────────────────────
+# ── 3/6 JS: dup const/let, Brackets ────────────────────────────────────────
 echo "[3] JS-Integrität"
 for js in "$MOD"/webroot/app.js "$MOD"/webroot/index.html; do
     [ -f "$js" ] || { _warn "$(basename "$js") fehlt"; continue; }
@@ -40,7 +40,7 @@ for js in "$MOD"/webroot/app.js "$MOD"/webroot/index.html; do
     [ "$ob" != "$cb" ] && _fail "$(basename "$js"): brackets $ob/$cb" || _pass "$(basename "$js") sauber"
 done
 
-# ── 4/5 Zone-Dryrun (nur auf Gerät möglich) ────────────────────────────────
+# ── 4/6 Zone-Dryrun (nur auf Gerät möglich) ────────────────────────────────
 echo "[4] Thermal-Zonen"
 if [ -d /sys/devices/virtual/thermal ]; then
     ZL=$(mktemp 2>/dev/null || echo /data/local/tmp/gate_zones.log)
@@ -53,7 +53,7 @@ else
     _pass "übersprungen (kein /sys — Dev-Machine)"
 fi
 
-# ── 5/5 Config-Sanity ──────────────────────────────────────────────────────
+# ── 5/6 Config-Sanity ──────────────────────────────────────────────────────
 echo "[5] Config"
 CONF="$MOD/config/settings.conf"
 [ -f "$CONF" ] || _fail "settings.conf fehlt"
@@ -87,7 +87,7 @@ if [ -f "$CONF" ]; then
     case "$m" in gaming|daily) _pass "mode=$m" ;; *) _fail "mode ungültig: [$m]" ;; esac
 fi
 
-# ── 5b/5 Version-Lock: service.sh (insmod) ↔ controller (wartet auf) ─────────
+# ── 5b/6 Version-Lock: service.sh (insmod) ↔ controller (wartet auf) ─────────
 echo "[5b] Version-Lock k6a_gov"
 GKV=$(grep "^GOV_KO_VER=" "$MOD/service.sh" 2>/dev/null | cut -d= -f2 | tr -d ' ')
 if echo "$GKV" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -107,7 +107,7 @@ else
     _fail "service.sh lädt kein k6a_gov.ko (insmod fehlt)"
 fi
 
-# ── 5c/5 SELinux: sepolicy.rule muss für ksud parsbar sein ─────────────────
+# ── 5c/6 SELinux: sepolicy.rule muss für ksud parsbar sein ─────────────────
 echo "[5c] sepolicy.rule (SELinux)"
 SP="$MOD/sepolicy.rule"
 if [ ! -f "$SP" ]; then
@@ -118,6 +118,34 @@ elif grep -q ':' "$SP"; then
     _fail "sepolicy.rule: Doppelpunkt-Syntax — ksud parst nur 'src tgt class {perms}'"
 else
     _pass "sepolicy.rule: kernel → sysfs file/dir"
+fi
+
+# ── 6/6 Governor: k6a-ctl MUSS auf schedutil umstellen (F1) ──────────────────
+echo "[6] Governor (schedutil)"
+if grep -q '_ensure_gov()' "$MOD/bin/k6a-lib.sh" 2>/dev/null; then
+    _pass "k6a-lib.sh: _ensure_gov() definiert"
+else
+    _fail "k6a-lib.sh: _ensure_gov() fehlt → Governor bleibt performance"
+fi
+if grep -q 'scaling_governor' "$MOD/bin/k6a-lib.sh" 2>/dev/null; then
+    _pass "k6a-lib.sh: scaling_governor-Write vorhanden"
+else
+    _fail "k6a-lib.sh: scaling_governor-Write fehlt"
+fi
+if grep -q '_ensure_gov' "$MOD/bin/k6a-controller" 2>/dev/null; then
+    _pass "controller ruft _ensure_gov() auf"
+else
+    _fail "controller ruft _ensure_gov() nicht auf"
+fi
+if grep -q 'w_checked()' "$MOD/bin/k6a-lib.sh" 2>/dev/null; then
+    _pass "k6a-lib.sh: w_checked() definiert"
+else
+    _fail "k6a-lib.sh: w_checked() fehlt (F8)"
+fi
+if grep -q 'echo 40' "$MOD/bin/k6a-lib.sh" 2>/dev/null; then
+    _fail "k6a-lib.sh: read_temp hartkodiert 40 (F10)"
+else
+    _pass "k6a-lib.sh: read_temp ohne 40-Fallback"
 fi
 
 echo "════════════════════════════════════"

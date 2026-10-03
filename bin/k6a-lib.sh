@@ -25,6 +25,13 @@ dbg()  { [ "${CFG_DEBUG:-0}" = "1" ] && { _logrot; printf '[%s] [DBG] %s\n' "$(d
 
 r() { cat "$1" 2>/dev/null || echo "0"; }
 w() { printf '%s' "$2" > "$1" 2>/dev/null; }
+w_checked() { # $1=pfad $2=wert — schreibt, loggt Fehler, rc=1 bei Fehlschlag
+    if ! printf '%s' "$2" > "$1" 2>/dev/null; then
+        warn "write failed: $1=$2"
+        return 1
+    fi
+    return 0
+}
 
 # ── dynamic clock tables ────────────────────────────────────────────────────
 _init_freq_tables() {
@@ -69,11 +76,11 @@ _cache_thermal_zones() {
     log "zones: Gold=$TZ_GOLD Silver=$TZ_SILVER"
 }
 
-read_temp() {
+read_temp() { # liefert °C; rc=1 + leer wenn keine Zone lesbar
     local t
-    t=$(cat "$TZ_GOLD" 2>/dev/null); [ -n "$t" ] && echo $(( t / 1000 )) && return
-    t=$(cat "$TZ_SILVER" 2>/dev/null); [ -n "$t" ] && echo $(( t / 1000 )) && return
-    echo 40
+    t=$(cat "$TZ_GOLD" 2>/dev/null); [ -n "$t" ] && echo $(( t / 1000 )) && return 0
+    t=$(cat "$TZ_SILVER" 2>/dev/null); [ -n "$t" ] && echo $(( t / 1000 )) && return 0
+    return 1
 }
 
 # ── cpu/gpu apply ───────────────────────────────────────────────────────────
@@ -84,6 +91,24 @@ cpu_apply() { # $1=sil_max $2=gold_max
 
 gpu_limits() { # $1=max_hz ($GPU_MAX = frei)
     w "$GPU/devfreq/max_freq" "${1:-$GPU_MAX}"
+}
+
+# ── governor: init.qcom.post_boot.sh schreibt ein nicht existierendes 'reflex'
+#    und laesst PERFORMANCE stehen; _apply_schedutil braucht $P6/schedutil. ──
+_GOV_WARNED=0
+_ensure_gov() { # idempotent, laeuft pro tick
+    local p g changed=0
+    for p in "$P0" "$P6"; do
+        g=$(cat "$p/scaling_governor" 2>/dev/null)
+        [ "$g" = "schedutil" ] && continue
+        w_checked "$p/scaling_governor" schedutil && changed=1
+    done
+    [ "$changed" = "1" ] && log "governor → schedutil"
+    if { [ ! -d "$P0/schedutil" ] || [ ! -d "$P6/schedutil" ]; } && [ "$_GOV_WARNED" = "0" ]; then
+        warn "schedutil-tunables fehlen (P0/P6) — scaling_governor-Write wirkte nicht"
+        _GOV_WARNED=1
+    fi
+    return 0
 }
 
 gov_sysfs_exists() { [ -d /sys/kernel/k6a_gov ]; }

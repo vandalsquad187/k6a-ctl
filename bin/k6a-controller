@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# k6a-ctl controller v1.3.1 — delegated thermal management
+# k6a-ctl controller v1.3.2 — delegated thermal management
 # states: DAILY | GAMING
 # tick-sleep: daily=5s gaming=1s
 
@@ -14,35 +14,43 @@ export MODDIR LOG_FILE=$LOG
 . "$MODDIR/bin/k6a-lib.sh"
 
 STATE="DAILY"; TICK=0; IDLE=0; _PREV=0; _GAMING_APPLIED=0
+_GM_SET=""; _VP_SET=""
 CFG_DEBUG=0
 
-cfg() {
-    local _k="$1" _v="" _line _kk _vv
-    [ -f "$CONFIG" ] || return 1
-    while IFS= read -r _line || [ -n "$_line" ]; do
-        case "$_line" in \#*|"") continue ;; esac
-        _kk=${_line%%=*}; _vv=${_line#*=}
-        [ "$_kk" = "$_k" ] || continue
-        _vv=${_vv%%#*}; _vv=$(printf '%s' "$_vv" | tr -d ' \t\r\n')
-        _v="$_vv"
-    done < "$CONFIG" 2>/dev/null
-    printf '%s' "$_v"
-}
-cfg_load() {
-    MODE=$(cfg mode);        [ "$MODE" != "gaming" ] && MODE="daily"
-    THP=$(cfg thermal_protect); [ "$THP" != "off" ] && THP="on"
-    PKG=$(cfg game_pkg);     PKG=${PKG:-com.activision.callofduty.shooter}
+cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
+    MODE=""; THP=""; PKG=""; DELEGATED=""; PROFILE=""
+    AUTO_BT=""; AUTO_HYST=""; BATT_T=""; BATT_GUARD=""; CFG_DEBUG=""
+    local _line _kk _vv
+    if [ -f "$CONFIG" ]; then
+        while IFS= read -r _line || [ -n "$_line" ]; do
+            case "$_line" in \#*|"") continue ;; esac
+            _kk=${_line%%=*}; _vv=${_line#*=}; _vv=${_vv%%#*}
+            case "$_kk" in
+                mode) MODE=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+                thermal_protect) THP=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+                game_pkg) PKG=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+                delegated) DELEGATED=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+                profile) PROFILE=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+                auto_badazz_temp) AUTO_BT=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+                auto_badazz_hyst) AUTO_HYST=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+                battery_guard_temp) BATT_T=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+                battery_guard) BATT_GUARD=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+                debug) CFG_DEBUG=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+            esac
+        done < "$CONFIG" 2>/dev/null
+    fi
+    [ "$MODE" = "gaming" ] || MODE="daily"
+    [ "$THP" = "off" ] || THP="on"
+    PKG=${PKG:-com.activision.callofduty.shooter}
     case "$PKG" in ""|*[!A-Za-z0-9._]*) PKG="com.activision.callofduty.shooter" ;; esac
-    DELEGATED=$(cfg delegated); [ "$DELEGATED" != "0" ] && DELEGATED=1
-    PROFILE=$(cfg profile)
+    [ "$DELEGATED" = "0" ] || DELEGATED=1
     case "$PROFILE" in gaming|battery|badazz|badazz_safe|custom|off) ;; *) PROFILE="gaming" ;; esac
-    AUTO_BT=$(cfg auto_badazz_temp)
     case "$AUTO_BT" in ''|*[!0-9]*) AUTO_BT=85 ;; *) [ "$AUTO_BT" -lt 70 ] 2>/dev/null && AUTO_BT=70; [ "$AUTO_BT" -gt 95 ] 2>/dev/null && AUTO_BT=95 ;; esac
-    AUTO_HYST=$(cfg auto_badazz_hyst); case "$AUTO_HYST" in ''|*[!0-9]*) AUTO_HYST=5 ;; *) [ "$AUTO_HYST" -lt 3 ] 2>/dev/null && AUTO_HYST=3; [ "$AUTO_HYST" -gt 10 ] 2>/dev/null && AUTO_HYST=10 ;; esac
-    BATT_T=$(cfg battery_guard_temp)
+    case "$AUTO_HYST" in ''|*[!0-9]*) AUTO_HYST=5 ;; *) [ "$AUTO_HYST" -lt 3 ] 2>/dev/null && AUTO_HYST=3; [ "$AUTO_HYST" -gt 10 ] 2>/dev/null && AUTO_HYST=10 ;; esac
     case "$BATT_T" in ''|*[!0-9]*) BATT_T=45 ;; *) [ "$BATT_T" -lt 35 ] 2>/dev/null && BATT_T=35; [ "$BATT_T" -gt 60 ] 2>/dev/null && BATT_T=60 ;; esac
-    BATT_GUARD=$(cfg battery_guard); [ "$BATT_GUARD" != "off" ] && BATT_GUARD="on"
-    CFG_DEBUG=$(cfg debug); [ "$CFG_DEBUG" != "1" ] && CFG_DEBUG=0
+    [ "$BATT_GUARD" = "off" ] || BATT_GUARD="on"
+    [ "$CFG_DEBUG" = "1" ] || CFG_DEBUG=0
+    return 0
 }
 
 # ── battery guard sync (kernel nodes battery_guard + battery_guard_temp) ─────
@@ -109,8 +117,9 @@ _startup() {
     echo $$ > "$PIDF"
     rm -f "$MODDIR"/run/*.tmp 2>/dev/null
     cfg_load; _cache_thermal_zones; _init_freq_tables
+    _ensure_gov
     _fix_usb_autosuspend
-    log "k6a-ctl v1.3.1 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD)"
+    log "k6a-ctl v1.3.2 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -179,25 +188,34 @@ _apply_schedutil() { # $1=gaming|daily
     fi
 }
 
-_apply_gaming_userspace() {
+_apply_gaming_userspace() { # billig: bei Entry + pro 5 Ticks (F13)
     _apply_schedutil gaming
-    local pid; pid=$(pidof "$PKG" 2>/dev/null | awk '{print $1}')
+    local pid
+    pid=$(pidof "$PKG" 2>/dev/null | awk '{print $1}')
     _set_game_pid "$pid"
-    if [ -n "$pid" ]; then
-        for tid in /proc/"$pid"/task/*/; do
-            tid=${tid%/}; tid=${tid##*/}
-            tn=$(cat "/proc/$pid/task/$tid/comm" 2>/dev/null)
-            case "$tn" in
-                *RenderThread*|*UnityMain*|*GLThread*)
-                    taskset -p 0xc0 "$tid" >/dev/null 2>&1 ;;
-                *Audio*|*audio*) taskset -p 0x3f "$tid" >/dev/null 2>&1 ;;
-            esac
-        done
-        renice -n -10 "$pid" >/dev/null 2>&1
-        echo -17 > "/proc/$pid/oom_adj" 2>/dev/null
+    if [ "$_GM_SET" != "1" ]; then
+        setprop persist.sys.game_mode 1 2>/dev/null; _GM_SET=1
     fi
-    setprop persist.sys.game_mode 1 2>/dev/null
-    setprop persist.sys.vulkan.perf_mode 1 2>/dev/null
+    if [ "$_VP_SET" != "1" ]; then
+        setprop persist.sys.vulkan.perf_mode 1 2>/dev/null; _VP_SET=1
+    fi
+}
+
+_tune_game_threads() { # teuer (/proc-Loop): bei Entry + pro 60 Ticks (F13)
+    local pid tid tn
+    pid=$(pidof "$PKG" 2>/dev/null | awk '{print $1}')
+    [ -n "$pid" ] || return 0
+    for tid in /proc/"$pid"/task/*/; do
+        tid=${tid%/}; tid=${tid##*/}
+        tn=$(cat "/proc/$pid/task/$tid/comm" 2>/dev/null)
+        case "$tn" in
+            *RenderThread*|*UnityMain*|*GLThread*)
+                taskset -p 0xc0 "$tid" >/dev/null 2>&1 ;;
+            *Audio*|*audio*) taskset -p 0x3f "$tid" >/dev/null 2>&1 ;;
+        esac
+    done
+    renice -n -10 "$pid" >/dev/null 2>&1
+    echo -17 > "/proc/$pid/oom_adj" 2>/dev/null
 }
 
 # ── state transitions ───────────────────────────────────────────────────────
@@ -210,7 +228,7 @@ _enter_daily() {
         log "-> DAILY (delegated, gov off)"
     else
         _apply_schedutil daily
-        setprop persist.sys.game_mode 0 2>/dev/null
+        [ "$_GM_SET" != "0" ] && { setprop persist.sys.game_mode 0 2>/dev/null; _GM_SET=0; }
         log "-> DAILY (legacy)"
     fi
 }
@@ -312,16 +330,18 @@ while true; do
     echo $$ > "$PIDF"
 
     cfg_load
+    _ensure_gov
     _sync_legacy
     TEMP_NOW=$(read_temp)
 
     if [ "$MODE" = "gaming" ]; then
         [ "$STATE" = "DAILY" ] && _enter_gaming
-        [ "$_GAMING_APPLIED" = "0" ] && { _apply_gaming_userspace; _GAMING_APPLIED=1; }
+        [ "$_GAMING_APPLIED" = "0" ] && { _apply_gaming_userspace; _tune_game_threads; _GAMING_APPLIED=1; }
         [ $(( TICK % 5 )) -eq 0 ] && _apply_gaming_userspace
+        [ $(( TICK % 60 )) -eq 0 ] && _tune_game_threads
 
         # Auto badazz_safe switch
-        [ "$DELEGATED" = "1" ] && _auto_badazz_switch "$TEMP_NOW"
+        [ "$DELEGATED" = "1" ] && [ -n "$TEMP_NOW" ] && _auto_badazz_switch "$TEMP_NOW"
 
         SLEEP=1
     else
@@ -331,6 +351,6 @@ while true; do
 
     _write_data "$TEMP_NOW"
     TICK=$(( TICK + 1 ))
-    [ $(( TICK % 60 )) -eq 0 ] && { _sync_batt_guard; log "hb tick=$TICK state=$STATE temp=${TEMP_NOW} delegated=$DELEGATED"; }
+    [ $(( TICK % 60 )) -eq 0 ] && { _sync_batt_guard; log "hb tick=$TICK state=$STATE temp=${TEMP_NOW:--} delegated=$DELEGATED"; }
     sleep $SLEEP
 done

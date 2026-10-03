@@ -60,7 +60,7 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 
 ```
 k6a-ctl/
-├── module.prop              id=k6a-ctl, v1.3.1
+├── module.prop              id=k6a-ctl, v1.3.2
 ├── service.sh               k6a_gov.ko laden (Version-Lock) + Watchdog + WebUI-Spawn
 ├── build.sh                 Gate-Pflicht + ZIP-Assembly
 ├── bin/
@@ -122,6 +122,29 @@ Beim Start prüft der Controller `/sys/kernel/k6a_gov/`:
 
 `settings.conf` wird jede Runde neu gelesen — Änderungen wirken ohne Neustart.
 Die Datei ist die **einzige Quelle der Wahrheit**; Kommentare (`#`) sind erlaubt.
+
+### Governor: schedutil erzwingen (F1)
+
+`init.qcom.post_boot.sh` schreibt an Policy 0/6 den nicht existierenden Governor
+`reflex`; der Kernel fällt dadurch auf `CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE`
+zurück. `scaling_max_freq` wird dann respektiert, aber **nie heruntergesetzt** —
+`performance` senkt `policy->max` nie ab, deshalb skaliert das System im Idle
+nicht aus, und die Tunables unter `$P6/schedutil/` existieren nicht einmal.
+
+`_ensure_gov()` (k6a-lib.sh) setzt beide Policies idempotent auf `schedutil`
+und läuft beim Start sowie vor jeder State-Verarbeitung im Tick. Schreibfehler
+werden über `w_checked()` geloggt; bleibt `$P6/schedutil/` danach aus, meldet
+das die Lib einmalig statt still zu scheitern.
+
+### Hot-Path-Kosten (v1.3.2)
+
+- `settings.conf` wird pro Tick **einmal** statt zehnmal gelesen (`cfg_load`)
+- Thread-Pinning/renice nur bei State-Entry und alle 60 Ticks, nicht alle 5
+- `setprop` nur bei tatsächlichem Wertwechsel
+- `read_temp` liefert ohne lesbare Zone leer („--") statt eines erfundenen 40 °C
+- fehlgeschlagene Schreibzugriffe werden geloggt statt ignoriert (`w_checked`)
+- `k6a_gov.ko`: Kandidat mit passender Version wird gewählt, statt beim ersten
+  vorhandenen (ggf. falschen) stehen zu bleiben
 
 ---
 

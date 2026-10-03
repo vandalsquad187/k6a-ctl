@@ -1,4 +1,4 @@
-// k6a-ctl app.js v1.3.1
+// k6a-ctl app.js v1.3.2
 var d = {};
 var _toastT = null;
 

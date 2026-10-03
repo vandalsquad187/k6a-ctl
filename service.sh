@@ -25,22 +25,28 @@ _load_gov() {
         log "k6a_gov bereits geladen"
         return 0
     fi
-    local ko="" kv="" gv="" out rc
-    for ko in "$MODDIR/k6a_gov.ko" /data/adb/k6a_gov.ko \
-              /system/lib/modules/k6a_gov.ko /vendor/lib/modules/k6a_gov.ko; do
-        [ -f "$ko" ] && break
-        ko=""
+    local ko="" kv="" gv="" out rc cand seen=0
+    for cand in "$MODDIR/k6a_gov.ko" /data/adb/k6a_gov.ko \
+                /system/lib/modules/k6a_gov.ko /vendor/lib/modules/k6a_gov.ko; do
+        [ -f "$cand" ] || continue
+        seen=1
+        if command -v strings >/dev/null 2>&1; then
+            kv=$(strings "$cand" 2>/dev/null | grep -E '^version=[0-9]+\.[0-9]+\.[0-9]+$' | head -1 | cut -d= -f2)
+            if [ -n "$kv" ] && [ "$kv" != "$GOV_KO_VER" ]; then
+                log "WARN $cand version=$kv, erwartet $GOV_KO_VER — überspringe"
+                continue
+            fi
+        fi
+        ko=$cand
+        break
     done
     if [ -z "$ko" ]; then
-        log "WARN k6a_gov.ko nicht gefunden — Legacy-Fallback (Userspace-Cooldown)"
-        return 1
-    fi
-    if command -v strings >/dev/null 2>&1; then
-        kv=$(strings "$ko" 2>/dev/null | grep -E '^version=[0-9]+\.[0-9]+\.[0-9]+$' | head -1 | cut -d= -f2)
-        if [ -n "$kv" ] && [ "$kv" != "$GOV_KO_VER" ]; then
-            log "WARN k6a_gov.ko version=$kv, erwartet $GOV_KO_VER — nicht geladen"
-            return 1
+        if [ "$seen" = "1" ]; then
+            log "WARN k6a_gov.ko: alle Kandidaten nicht version-konform — Legacy-Fallback (Userspace-Cooldown)"
+        else
+            log "WARN k6a_gov.ko nicht gefunden — Legacy-Fallback (Userspace-Cooldown)"
         fi
+        return 1
     fi
     out=$(/system/bin/insmod "$ko" 2>&1)
     rc=$?
