@@ -64,7 +64,7 @@ if [ -f "$CONF" ]; then
     if [ "$DEL" = "1" ]; then
         # Delegated: thresholds in kernel, prüfe profile + auto_badazz
         PROF=$(grep "^profile=" "$CONF" | cut -d= -f2 | tr -d ' ')
-        case "$PROF" in gaming|battery|badazz|badazz_safe) _pass "profile=$PROF" ;; *) _fail "profile ungültig: [$PROF]" ;; esac
+        case "$PROF" in gaming|battery|badazz|badazz_safe|custom) _pass "profile=$PROF" ;; *) _fail "profile ungültig: [$PROF]" ;; esac
         ABT=$(grep "^auto_badazz_temp=" "$CONF" | cut -d= -f2 | tr -d ' ')
         [ -n "$ABT" ] && [ "$ABT" -ge 70 ] 2>/dev/null && [ "$ABT" -le 95 ] 2>/dev/null \
             && _pass "auto_badazz_temp=${ABT}°C" || _fail "auto_badazz_temp ungültig: [$ABT]"
@@ -73,6 +73,31 @@ if [ -f "$CONF" ]; then
             && _pass "battery_guard_temp=${BGT}°C" || _fail "battery_guard_temp ungültig: [$BGT]"
         BG=$(grep "^battery_guard=" "$CONF" | cut -d= -f2 | tr -d ' ')
         case "$BG" in on|off) _pass "battery_guard=$BG" ;; *) _fail "battery_guard ungültig: [$BG]" ;; esac
+
+        # Gold-Cluster-Deckelung: 0 = frei, sonst Hz (wird auf OPP gesnappt)
+        for _k in gold_cap_gaming gold_cap_daily; do
+            _v=$(grep "^${_k}=" "$CONF" | cut -d= -f2 | tr -d ' \r')
+            case "$_v" in
+                '') _fail "${_k} fehlt" ;;
+                *[!0-9]*) _fail "${_k} ungültig: [$_v]" ;;
+                *) _pass "${_k}=$_v Hz" ;;
+            esac
+        done
+        # cd_thresholds: genau 7 Zahlen in fester Reihenfolge l2t l3t l4t rec l2g l3g l4g
+        CDT=$(grep "^cd_thresholds=" "$CONF" | cut -d= -f2- | tr -d '\r')
+        _n=$(printf '%s' "$CDT" | wc -w 2>/dev/null)
+        if [ -z "$CDT" ]; then
+            _fail "cd_thresholds fehlt"
+        elif [ "${_n:-0}" -ne 7 ] 2>/dev/null; then
+            _fail "cd_thresholds: erwartet 7 Werte, hat $_n"
+        else
+            set -- $CDT
+            if [ "$4" -ge "$1" ] 2>/dev/null; then _fail "cd_thresholds: rec($4) >= l2t($1)"
+            elif [ "$1" -ge "$2" ] 2>/dev/null; then _fail "cd_thresholds: l2t($1) >= l3t($2)"
+            elif [ "$2" -ge "$3" ] 2>/dev/null; then _fail "cd_thresholds: l3t($2) >= l4t($3)"
+            elif [ "$5" -lt "$6" ] 2>/dev/null || [ "$6" -lt "$7" ] 2>/dev/null; then _fail "cd_thresholds: Gold-Grenzen nicht absteigend"
+            else _pass "cd_thresholds $CDT" ; fi
+        fi
     else
         # Legacy: thresholds in settings.conf
         L2=$(grep "^cd_l2_temp=" "$CONF" | cut -d= -f2); L3=$(grep "^cd_l3_temp=" "$CONF" | cut -d= -f2)

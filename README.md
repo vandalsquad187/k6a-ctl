@@ -15,8 +15,22 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 
 ## Features
 
+- **Zwei Modi, sonst nichts** — `daily` (Akku schonen) ↔ `gaming` (Leistung),
+  per WebUI `/mode?m=…` oder Config. Keine Auto-Spielerkennung, jeder Modus
+  ist ein stimmiges Gesamtpaket
+- **Gold-Cluster-Deckelung pro Modus** — `gold_cap_gaming` / `gold_cap_daily`
+  begrenzen `scaling_max_freq` der A76 auf die nächstgelegene verfügbare OPP.
+  Kernbefund 2026-10 (COD Mobile, SD732G): die Last ist bandbreiten-/wärmelimitiert,
+  nicht cpu-limitiert — 1708800 Hz (−26 %) steigerte die Bildrate messbar,
+  weil der Speicher kühler bleibt und seine Timings hält
+- **Persistente Schwellwerte** — `cd_thresholds` wird beim Start neu angewendet,
+  überlebt also Reboot und Modul-Neustart. Reihenfolge `l2t l3t l4t rec l2g l3g l4g`
+  ist durch den Kernel fix (rec zuerst → `-EINVAL`, still abgelehnt)
+- **Schedutil-Tuning pro Modus** — gaming: `up=500 down=20000 hispeed_load=50`,
+  daily: `up=10000 down=50000`. Der Unterschied ist messbar: mit
+  `down_rate_limit=1000` sackte die Taktrate mitten im Frame bis auf 0,81 GHz
 - **Auto-Delegation** — erkennt `/sys/kernel/k6a_gov/` zur Laufzeit:
-  der Kernel übernimmt Cooldown-Enforcement, das Modul Boost/Pinning/Monitoring
+  der Kernel übernimmt Cooldown-Enforcement, das Modul Boost/Monitoring
 - **Auto-Ladung des Governors** — `service.sh` hängt `k6a_gov.ko` per `insmod`
   (Suchreihenfolge Modulordner → `/data/adb` → `/system/lib/modules` →
   `/vendor/lib/modules`) und fällt bei jedem Fehler still auf den Legacy-Cooldown zurück
@@ -60,13 +74,13 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 
 ```
 k6a-ctl/
-├── module.prop              id=k6a-ctl, v1.3.2
+├── module.prop              id=k6a-ctl, v1.4.0
 ├── service.sh               k6a_gov.ko laden (Version-Lock) + Watchdog + WebUI-Spawn
 ├── build.sh                 Gate-Pflicht + ZIP-Assembly
 ├── bin/
-│   ├── check_module.sh      Build-Gate: 5 Checks vor jedem Zip
+│   ├── check_module.sh      Build-Gate: Checks vor jedem Zip
 │   ├── k6a-lib.sh           schlanke HW-Schicht: unalias r, dynamische Tables, Zonen
-│   ├── k6a-controller       State Machine OFF/GAMING/CD_L2-L4 + Hysterese + Backoff
+│   ├── k6a-controller       State Machine DAILY/GAMING + Gold-Cap + Schwellwerte
 │   ├── webui-server.sh      nc-Listener :8767 (127.0.0.1 only)
 │   └── webui-handler.sh     Whitelist-Request-Handler (/mode /thermal /ping)
 ├── config/settings.conf     EINZIGE Quelle der Wahrheit (hot-reload)
@@ -95,19 +109,14 @@ k6a-ctl/
 
 ### State Machine
 
-Der Controller läuft als Daemon mit adaptivem Tick-Raster und kennt fünf Zustände:
+Der Controller läuft als Daemon mit adaptivem Tick-Raster und kennt zwei Modi
+plus die Kernel-Cooldown-Zustände (nur im Legacy-Fallback):
 
 | Zustand | Trigger | Tick | Wirkung |
 |---------|---------|------|---------|
-| `DAILY` | mode=daily oder Start | 5s | Monitoring-only, keine Caps |
-| `GAMING` | mode=gaming | 1s | Pinning (RenderThread→Gold), Props, IRQ |
-| `CD_L2` | ≥88°C | 2s | Gold auf ~90% des Max, GPU ~70% |
-| `CD_L3` | ≥92°C | 2s | Gold ~70%, GPU ~44% |
-| `CD_L4` | ≥95°C | 2s | Gold ~58%, GPU ~33% (Notbremse) |
-
-Recover: unter `cd_recover` (80°C) zurück zu GAMING. Die Hysterese misst den
-Temp-Anstieg pro Tick: steil (>5°/Tick) → kurzes Dwell, sonst langes Dwell —
-verhindert Flattern um die Schwelle.
+| `DAILY` | mode=daily | 5s | Monitoring, `gold_cap_daily`, schedutil daily, Gov aus |
+| `GAMING` | mode=gaming | 1s | `gold_cap_gaming`, Schwellwerte, schedutil gaming, Gov an, Props |
+| `CD_L2`–`CD_L4` | ≥ `l2t`/`l3t`/`l4t` | – | mit `k6a_gov`: kernel-seitig; ohne: Userspace-Fallback |
 
 ### Delegation (Auto-Erkennung)
 
@@ -136,10 +145,12 @@ und läuft beim Start sowie vor jeder State-Verarbeitung im Tick. Schreibfehler
 werden über `w_checked()` geloggt; bleibt `$P6/schedutil/` danach aus, meldet
 das die Lib einmalig statt still zu scheitern.
 
-### Hot-Path-Kosten (v1.3.2)
+### Hot-Path-Kosten
 
 - `settings.conf` wird pro Tick **einmal** statt zehnmal gelesen (`cfg_load`)
-- Thread-Pinning/renice nur bei State-Entry und alle 60 Ticks, nicht alle 5
+- **`taskset` ist entfernt** (v1.4.0) — Androids cpuset-Controller setzt die
+  Affinität ohnehin zurück; der Loop über alle Threads kostete Zeit und bewirkte nichts
+- Thread-`renice`/`oom_adj` nur bei State-Entry und alle 60 Ticks, nicht alle 5
 - `setprop` nur bei tatsächlichem Wertwechsel
 - `read_temp` liefert ohne lesbare Zone leer („--") statt eines erfundenen 40 °C
 - fehlgeschlagene Schreibzugriffe werden geloggt statt ignoriert (`w_checked`)
@@ -202,17 +213,20 @@ seit v1.0.6 macht der Kernel bewusst **CPU-only**.
 
 | Key | Default | Bedeutung |
 |-----|---------|-----------|
-| `mode` | `gaming` | `gaming` / `daily` |
+| `mode` | `gaming` | `gaming` / `daily` — einziger Schalter, sonst nichts |
 | `thermal_protect` | `on` | `on` / `off` |
 | `delegated` | `1` | `1` = Kernel-Governor erzwingt (`legacy=1`), `0` = reines Userspace (`legacy=0`) |
-| `game_pkg` | CODM | Package für Thread-Pinning |
+| `profile` | `custom` | `gaming` / `battery` / `badazz` / `badazz_safe` / `custom` — `custom` behält die `cd_thresholds` |
+| `gold_cap_gaming` | 1708800 | Gold-Cluster-Deckelung im Gaming-Modus (Hz, `0` = frei) |
+| `gold_cap_daily` | 1555200 | dasselbe im Daily-Modus |
+| `cd_thresholds` | 93 96 99 90 1708800 1555200 1324800 | `l2t l3t l4t rec l2g l3g l4g` — Reihenfolge kernel-fix, wird beim Start angewendet |
+| `game_pkg` | CODM | Package für renice/oom-Boost |
 | `battery_guard` | `on` | Akku-Guard an/aus → `/sys/kernel/k6a_gov/battery_guard` (0/1) |
 | `battery_guard_temp` | 45 | Akku-Guard-Schwelle (35–60 °C) |
-| `cd_l2_temp` … `cd_l4_temp` | 80/82/88 | Cooldown-Eingriffe (°C) |
-| `cd_recover` | 76 | Recover unterhalb (°C) |
-| `hysteresis_fast` / `_normal` | 3/10 | Dwell-Zyklen |
-| `cd_*_gold_pct` | 90/70/58 | Gold-Caps als % vom Geräte-Max |
-| `cd_*_gpu_pct` | 70/44/33 | GPU-Caps als % vom Geräte-Max |
+| `auto_badazz_temp` / `_hyst` | 95 / 5 | nur wirksam bei `profile=gaming` |
+
+> Legacy-Keys (`cd_l2_temp` … `cd_*_pct`, `hysteresis_*`) greifen nur ohne
+> In-Kernel-Governor. Mit `k6a_gov` sind die Schwellen kernel-seitig.
 
 ## Manuelle Steuerung
 

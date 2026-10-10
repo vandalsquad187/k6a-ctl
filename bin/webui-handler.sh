@@ -9,6 +9,7 @@ PATHQ=${REST%% *}
 P=${PATHQ%%\?*}
 Q=${PATHQ#*\?}
 [ "$Q" = "$PATHQ" ] && Q=""
+Q=${Q%%&*}
 
 ok()  { printf 'HTTP/1.0 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK'; }
 bad() { printf 'HTTP/1.0 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'; }

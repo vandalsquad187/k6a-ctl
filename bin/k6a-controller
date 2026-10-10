@@ -1,6 +1,6 @@
 #!/system/bin/sh
-# k6a-ctl controller v1.3.2 — delegated thermal management
-# states: DAILY | GAMING
+# k6a-ctl controller v1.4.0 — delegated thermal management
+# states: DAILY | GAMING (manual switch via settings.conf / WebUI, no auto-detect)
 # tick-sleep: daily=5s gaming=1s
 
 MODDIR="${1:-/data/adb/modules/k6a-ctl}"
@@ -13,13 +13,22 @@ GOV="/sys/kernel/k6a_gov"
 export MODDIR LOG_FILE=$LOG
 . "$MODDIR/bin/k6a-lib.sh"
 
-STATE="DAILY"; TICK=0; IDLE=0; _PREV=0; _GAMING_APPLIED=0
+STATE=""; TICK=0; IDLE=0; _PREV=0; _GAMING_APPLIED=0
 _GM_SET=""; _VP_SET=""
 CFG_DEBUG=0
+CAP_G_RAW=""; CAP_D_RAW=""
+
+# Gold-Cluster-Deckelung: 0 = frei; sonst nächstgelegene OPP ≤ Ziel (F14)
+_norm_cap() { # $1=roh — snappt auf verfügbare OPP, 0 bleibt 0
+    case "$1" in ''|*[!0-9]*) echo 0; return ;; esac
+    [ "$1" -eq 0 ] 2>/dev/null && { echo 0; return; }
+    _pick_freq "$GOLD_FREQS" "$1"
+}
 
 cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
     MODE=""; THP=""; PKG=""; DELEGATED=""; PROFILE=""
     AUTO_BT=""; AUTO_HYST=""; BATT_T=""; BATT_GUARD=""; CFG_DEBUG=""
+    CAP_G=""; CAP_D=""; CDT=""
     local _line _kk _vv
     if [ -f "$CONFIG" ]; then
         while IFS= read -r _line || [ -n "$_line" ]; do
@@ -35,6 +44,9 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
                 auto_badazz_hyst) AUTO_HYST=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
                 battery_guard_temp) BATT_T=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
                 battery_guard) BATT_GUARD=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+                gold_cap_gaming) CAP_G=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
+                gold_cap_daily) CAP_D=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
+                cd_thresholds) CDT=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
                 debug) CFG_DEBUG=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
             esac
         done < "$CONFIG" 2>/dev/null
@@ -50,6 +62,18 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
     case "$BATT_T" in ''|*[!0-9]*) BATT_T=45 ;; *) [ "$BATT_T" -lt 35 ] 2>/dev/null && BATT_T=35; [ "$BATT_T" -gt 60 ] 2>/dev/null && BATT_T=60 ;; esac
     [ "$BATT_GUARD" = "off" ] || BATT_GUARD="on"
     [ "$CFG_DEBUG" = "1" ] || CFG_DEBUG=0
+    # Rohwert sichern — die Normalisierung gegen GOLD_FREQS läuft erst nach
+    # _init_freq_tables im _startup, hier ist die Tabelle noch leer (F17)
+    case "$CAP_G" in ''|*[!0-9]*) CAP_G=0 ;; esac
+    case "$CAP_D" in ''|*[!0-9]*) CAP_D=0 ;; esac
+    CAP_G_RAW=$CAP_G; CAP_D_RAW=$CAP_D
+    # Erster Aufruf: GOLD_FREQS noch leer → 0; ab _init_freq_tables gültig (F17)
+    CAP_G=$(_norm_cap "$CAP_G_RAW"); CAP_D=$(_norm_cap "$CAP_D_RAW")
+    # Schwellwerte: genau 7 Zahlen, sonst ignorieren (Kernel-Defaults bleiben)
+    case "$CDT" in
+        ''|*[!0-9\ ]*) CDT="" ;;
+        *) set -- $CDT; [ $# -eq 7 ] || CDT="" ;;
+    esac
     return 0
 }
 
@@ -117,9 +141,15 @@ _startup() {
     echo $$ > "$PIDF"
     rm -f "$MODDIR"/run/*.tmp 2>/dev/null
     cfg_load; _cache_thermal_zones; _init_freq_tables
+    # Caps gegen die frisch gelesene OPP-Tabelle normalisieren — cfg_load lief
+    # vor _init_freq_tables, dort war GOLD_FREQS noch leer (F17)
+    CAP_G=$(_norm_cap "$CAP_G_RAW"); CAP_D=$(_norm_cap "$CAP_D_RAW")
     _ensure_gov
+    # Schwellwerte neu anwenden — sie existieren nur im Sysfs und gehen bei
+    # Reboot/Modul-Neustart sonst verloren (2× passiert, F16)
+    _apply_cd_thresholds
     _fix_usb_autosuspend
-    log "k6a-ctl v1.3.2 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD)"
+    log "k6a-ctl v1.4.0 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0})"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -201,49 +231,74 @@ _apply_gaming_userspace() { # billig: bei Entry + pro 5 Ticks (F13)
     fi
 }
 
-_tune_game_threads() { # teuer (/proc-Loop): bei Entry + pro 60 Ticks (F13)
-    local pid tid tn
+_tune_game_threads() { # billig: renice/oom nur — taskset entfallen (Android-cpuset setzt zurück)
+    local pid
     pid=$(pidof "$PKG" 2>/dev/null | awk '{print $1}')
     [ -n "$pid" ] || return 0
-    for tid in /proc/"$pid"/task/*/; do
-        tid=${tid%/}; tid=${tid##*/}
-        tn=$(cat "/proc/$pid/task/$tid/comm" 2>/dev/null)
-        case "$tn" in
-            *RenderThread*|*UnityMain*|*GLThread*)
-                taskset -p 0xc0 "$tid" >/dev/null 2>&1 ;;
-            *Audio*|*audio*) taskset -p 0x3f "$tid" >/dev/null 2>&1 ;;
-        esac
-    done
     renice -n -10 "$pid" >/dev/null 2>&1
     echo -17 > "/proc/$pid/oom_adj" 2>/dev/null
+}
+
+# ── gold-cluster deckelung ────────────────────────────────────────────────────
+# Kernbefund 2026-10: die Last ist bandbreiten-/wärmelimitiert, nicht cpu-limitiert.
+# 1708800 Hz (−26 %) hob die Bildrate um ~17 % (49,8 → 58,2 fps), weil der
+# Speicher kühler bleibt; darunter (1555200) wird man rechenlimitiert und die
+# Bildrate bricht wieder ein. Tagesmodus deckelt tiefer, kostet im Alltag nichts.
+_GOLD_CAP_APPLIED=""
+_apply_gold_cap() { # $1=Hz (0 = aufheben)
+    local want cur
+    want="${1:-0}"
+    case "$want" in ''|*[!0-9]*) want=0 ;; esac
+    [ "$_GOLD_CAP_APPLIED" = "$want" ] && return 0
+    if [ "$want" = "0" ]; then
+        w "$P6/scaling_max_freq" "$GOLD_MAX"
+    else
+        w "$P6/scaling_max_freq" "$want"
+    fi
+    cur=$(r "$P6/scaling_max_freq")
+    _GOLD_CAP_APPLIED=$want
+    log "gold_cap → ${want:-off} (p6_max=$cur)"
+}
+
+# ── schwellwerte aus settings.conf anwenden ──────────────────────────────────
+# Kernel-Reihenfolge ist fix: l2t l3t l4t rec l2g l3g l4g. rec zuerst schreiben
+# ergibt -EINVAL, still abgelehnt (F15). profile=custom lässt die Werte stehen.
+_apply_cd_thresholds() {
+    [ -n "$CDT" ] || return 0
+    gov_sysfs_exists || return 0
+    gov_write "profile" "$(profile_to_idx "$PROFILE")" 2>/dev/null
+    gov_write "cd_thresholds" "$CDT" || return 0
+    log "cd_thresholds ← $CDT"
 }
 
 # ── state transitions ───────────────────────────────────────────────────────
 _enter_daily() {
     STATE="DAILY"; _GAMING_APPLIED=0; IDLE=0
     _set_game_pid ""
+    _apply_gold_cap "$CAP_D"
+    _apply_schedutil daily
+    [ "$_GM_SET" != "0" ] && { setprop persist.sys.game_mode 0 2>/dev/null; _GM_SET=0; }
     if [ "$DELEGATED" = "1" ] && gov_sysfs_exists; then
         gov_write "enable" 0
-        _apply_profile "gaming"
-        log "-> DAILY (delegated, gov off)"
+        log "-> DAILY (delegated, gov off, gold_cap=${CAP_D:-off})"
     else
-        _apply_schedutil daily
-        [ "$_GM_SET" != "0" ] && { setprop persist.sys.game_mode 0 2>/dev/null; _GM_SET=0; }
-        log "-> DAILY (legacy)"
+        log "-> DAILY (legacy, gold_cap=${CAP_D:-off})"
     fi
 }
 
 _enter_gaming() {
     STATE="GAMING"; IDLE=0; _GAMING_APPLIED=0
+    _apply_gold_cap "$CAP_G"
     if [ "$DELEGATED" = "1" ] && gov_sysfs_exists; then
+        _apply_cd_thresholds
         gov_write "enable" 1
         _apply_profile "$PROFILE"
         _sync_batt_guard
-        log "-> GAMING (delegated, profile=$PROFILE)"
+        log "-> GAMING (delegated, profile=$PROFILE, gold_cap=${CAP_G:-off})"
     else
         cpu_apply "$SILVER_MAX" "$GOLD_MAX"
         gpu_limits "$GPU_MAX"
-        log "-> GAMING (legacy)"
+        log "-> GAMING (legacy, gold_cap=${CAP_G:-off})"
     fi
 }
 
@@ -335,7 +390,7 @@ while true; do
     TEMP_NOW=$(read_temp)
 
     if [ "$MODE" = "gaming" ]; then
-        [ "$STATE" = "DAILY" ] && _enter_gaming
+        [ "$STATE" != "GAMING" ] && _enter_gaming
         [ "$_GAMING_APPLIED" = "0" ] && { _apply_gaming_userspace; _tune_game_threads; _GAMING_APPLIED=1; }
         [ $(( TICK % 5 )) -eq 0 ] && _apply_gaming_userspace
         [ $(( TICK % 60 )) -eq 0 ] && _tune_game_threads
