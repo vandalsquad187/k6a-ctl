@@ -1,8 +1,9 @@
 #!/system/bin/sh
-# k6a-ctl controller v1.4.2 — delegated thermal management
+# k6a-ctl controller v1.4.3 — delegated thermal management
 # states: DAILY | GAMING (manual switch via settings.conf / WebUI, no auto-detect)
 # tick-sleep: daily=5s gaming=1s
 # v1.4.2: silver_cap_gaming (policy0) + gpu_cap_gaming (kgsl) deckel, Kappe
+# v1.4.3: thermal_protect wirksam (on=Deckel/mäß, off=Deckel pausiert); Gold-Cap-UI-Toggle
 
 MODDIR="${1:-/data/adb/modules/k6a-ctl}"
 CONFIG="$MODDIR/config/settings.conf"
@@ -18,6 +19,7 @@ STATE=""; TICK=0; IDLE=0; _PREV=0; _GAMING_APPLIED=0
 _GM_SET=""; _VP_SET=""
 SILCAP_G="0"; GPUCAP_G="0"
 _GOLD_CAP_APPLIED=""; _SIL_CAP_APPLIED=""; _GPU_CAP_APPLIED=""
+_THP_APPLIED=""
     CFG_DEBUG=0
     CAP_G_RAW=""; CAP_D_RAW=""
     SILCAP_G_RAW="0"; GPUCAP_G_RAW="0"
@@ -159,7 +161,7 @@ _startup() {
     # Reboot/Modul-Neustart sonst verloren (2× passiert, F16)
     _apply_cd_thresholds
     _fix_usb_autosuspend
-    log "k6a-ctl v1.4.2 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0})"
+    log "k6a-ctl v1.4.3 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0})"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -318,6 +320,22 @@ _apply_cd_thresholds() {
 }
 
 # ── state transitions ───────────────────────────────────────────────────────
+# thermal_protect (v1.4.3, jetzt wirksam): on = Deckel genau per settings.conf;
+# off = Gaming-Deckel pausieren (gold/silver/gpu → Boot-Max). battery_guard,
+# auto_badazz_switch und cd_thresholds bleiben UNABHÄNGIG davon — das sind
+# die eigentlichen Kernel-Schutzschichten.
+_apply_caps_gaming() {
+    [ "$_THP_APPLIED" = "$THP" ] && return 0
+    _THP_APPLIED=$THP
+    if [ "$THP" = "off" ]; then
+        _apply_gold_cap 0; _apply_silver_cap 0; _apply_gpu_cap 0
+        log "thermal_protect=off → Gaming-Deckel pausiert (gold/silver/gpu = Boot-Max)"
+    else
+        _apply_gold_cap "$CAP_G"; _apply_silver_cap "$SILCAP_G"; _apply_gpu_cap "$GPUCAP_G"
+        log "thermal_protect=on → Deckel aktiv (gold=${CAP_G:-0} silver=${SILCAP_G:-0} gpu=${GPUCAP_G:-0})"
+    fi
+}
+
 _enter_daily() {
     STATE="DAILY"; _GAMING_APPLIED=0; IDLE=0
     _set_game_pid ""
@@ -336,9 +354,7 @@ _enter_daily() {
 
 _enter_gaming() {
     STATE="GAMING"; IDLE=0; _GAMING_APPLIED=0
-    _apply_gold_cap "$CAP_G"
-    _apply_silver_cap "$SILCAP_G"
-    _apply_gpu_cap "$GPUCAP_G"
+    _apply_caps_gaming
     if [ "$DELEGATED" = "1" ] && gov_sysfs_exists; then
         _apply_cd_thresholds
         gov_write "enable" 1
@@ -393,6 +409,7 @@ _write_data() {
 state=$STATE
 mode=$MODE
 thermal_protect=$THP
+gold_cap=$CAP_G
 temp=$t
 cpu_sil_mhz=$cs
 cpu_gold_mhz=$cg
@@ -441,6 +458,7 @@ while true; do
 
     if [ "$MODE" = "gaming" ]; then
         [ "$STATE" != "GAMING" ] && _enter_gaming
+        _apply_caps_gaming
         [ "$_GAMING_APPLIED" = "0" ] && { _apply_gaming_userspace; _tune_game_threads; _GAMING_APPLIED=1; }
         [ $(( TICK % 5 )) -eq 0 ] && _apply_gaming_userspace
         [ $(( TICK % 60 )) -eq 0 ] && _tune_game_threads

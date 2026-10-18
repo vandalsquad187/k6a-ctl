@@ -347,3 +347,23 @@ Erhöhen verschlechtert den Standistäfen — ohne Lüfter muss irgendwo ein
 Deckel mitmachen andernfalls heizt der Akku (bt >45 °C). **Der Lüfter
 erledigt es** — deshalb bleibt `gpu_cap_gaming=0` der Default; 700000000
 ist ein sinnvoller NoFan-Experimentwert (CPU-limitiert, tp besser ~80 °C).
+
+## 2026-10-18 — v1.4.3: Gold-Cap-UI-Toggle + thermal_protect wirksam
+
+**Analyse-Erkenntnis v1.4.2:** `thermal_protect` war ein **toter Schalter**
+(Code-Befund: parse + Anzeige + Log, aber **keine** `$THP`-Verzweigung im
+Enforcement-Pfad). v1.4.3 bindet ihn mit echter Semantik:
+
+| Flag | Wirkung |
+|---|---|
+| `thermal_protect=on`  | Gaming-Deckel **aktiv** (gold/silver/gpu per settings.conf) |
+| `thermal_protect=off` | Gaming-Deckel **pausiert** (alle drei → Boot-Max); `battery_guard`, `auto_badazz_switch`, `cd_thresholds` bleiben aktiv (echte Schutzschichten) |
+
+**WebUI-Toggles (Einstellungskarte):**
+- **"Gold-Cap 1708/2304"**: `an` = `gold_cap_gaming=1708800`, `aus` = `0`
+  (=2304 MHz frei) — der bewährte Tuning-Schalter aus den r46–r54-Messungen.
+- **"Thermal-Schutz"** pausiert/aktiviert alle drei Deckel in einem Zug.
+
+Live-Verhalten: `cfg_load` läuft pro Tick und `_apply_caps_gaming` ist
+idempotent — Reaktionszeit bei mode=gaming ≈ 1 s; beim Wechsel Daily→
+wird eh auf Boot-Max restauriert.

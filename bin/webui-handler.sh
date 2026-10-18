@@ -67,6 +67,12 @@ case "$P" in
             t=on|t=off) setcfg thermal_protect "${Q#t=}"; ok ;;
             *) bad ;;
         esac ;;
+    /goldcap)
+        case "$Q" in
+            g=on) setcfg gold_cap_gaming 1708800; ok ;;
+            g=off) setcfg gold_cap_gaming 0; ok ;;
+            *) bad ;;
+        esac ;;
     /profile)
         case "$Q" in
             p=gaming|p=battery|p=badazz|p=badazz_safe|p=custom|p=off) setcfg profile "${Q#p=}"; ok ;;

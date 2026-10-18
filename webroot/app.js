@@ -32,7 +32,13 @@ function setMode(m) {
 function setThp(on) {
     api('/thermal?t=' + (on ? 'on' : 'off'));
     d.thermal_protect = on ? 'on' : 'off';
-    toast('Thermal-Schutz ' + (on ? 'an' : 'aus'));
+    toast('Thermal-Schutz (Gaming-Deckel) ' + (on ? 'an' : 'aus'));
+}
+
+function setGoldCap(on) {
+    api('/goldcap?g=' + (on ? 'on' : 'off'));
+    d.gold_cap = on ? '1708800' : '0';
+    toast('Gold-Cap ' + (on ? 'an (1708800)' : 'aus (2304 max)'));
 }
 
 function setProfile(p) {
@@ -208,6 +214,8 @@ function render() {
 
     var thp = document.getElementById('thpToggle');
     if (d.thermal_protect !== undefined) thp.checked = d.thermal_protect === 'on';
+    var gc = document.getElementById('gcToggle');
+    if (d.gold_cap !== undefined) gc.checked = d.gold_cap !== '0';
 }
 
 setInterval(fetchData, 2000);
