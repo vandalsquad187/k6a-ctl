@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# k6a-ctl controller v1.4.0 — delegated thermal management
+# k6a-ctl controller v1.4.1 — delegated thermal management
 # states: DAILY | GAMING (manual switch via settings.conf / WebUI, no auto-detect)
 # tick-sleep: daily=5s gaming=1s
 
@@ -149,7 +149,7 @@ _startup() {
     # Reboot/Modul-Neustart sonst verloren (2× passiert, F16)
     _apply_cd_thresholds
     _fix_usb_autosuspend
-    log "k6a-ctl v1.4.0 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0})"
+    log "k6a-ctl v1.4.1 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0})"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -262,10 +262,15 @@ _apply_gold_cap() { # $1=Hz (0 = aufheben)
 
 # ── schwellwerte aus settings.conf anwenden ──────────────────────────────────
 # Kernel-Reihenfolge ist fix: l2t l3t l4t rec l2g l3g l4g. rec zuerst schreiben
-# ergibt -EINVAL, still abgelehnt (F15). profile=custom lässt die Werte stehen.
+# ergibt -EINVAL, still abgelehnt (F15). Idempotent: nur schreiben, wenn sysfs
+# abweicht — verhindert Boot-Spam und ein unnötiges thresholds_user-Flag, wenn
+# der Kernel-Default (build352 GAMING-Profil) bereits die selben Werte hält.
 _apply_cd_thresholds() {
     [ -n "$CDT" ] || return 0
     gov_sysfs_exists || return 0
+    local cur
+    cur=$(r "$GOV/cd_thresholds" 2>/dev/null | tr '\n' ' ' | tr -s ' ' | sed 's/^ //;s/ $//')
+    [ "$cur" = "$CDT" ] && return 0
     gov_write "profile" "$(profile_to_idx "$PROFILE")" 2>/dev/null
     gov_write "cd_thresholds" "$CDT" || return 0
     log "cd_thresholds ← $CDT"

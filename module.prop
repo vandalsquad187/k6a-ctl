@@ -1,6 +1,6 @@
 id=k6a-ctl
 name=k6a-ctl
-version=1.4.0
-versionCode=140
+version=1.4.1
+versionCode=141
 author=BadaZz89
-description=Two-mode (daily/gaming) governor companion for BadazzKernel: gold-cluster cap, persistent cd_thresholds, schedutil tuning, delegates to in-kernel k6a_gov. Single-source config, localhost WebUI.
+description=Two-mode (daily/gaming) governor companion for BadazzKernel: gold-cluster cap, persistent (idempotent written) cd_thresholds 96/99/102/93, schedutil tuning, delegates to in-kernel k6a_gov. Single-source config, localhost WebUI.

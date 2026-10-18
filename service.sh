@@ -18,7 +18,9 @@ chmod 755 "$MODDIR/bin/k6a-controller" "$MODDIR/bin/webui-server.sh" "$MODDIR/bi
 
 # ── k6a_gov.ko laden (CONFIG_K6A_GOV=m ab Badazz Build 341) ──────────────────
 GOV=/sys/kernel/k6a_gov
-GOV_KO_VER=1.5.0
+GOV_KO_VER=1.5.1
+
+kver_ok() { case "${1:-}" in 1.5.*) return 0 ;; *) return 1 ;; esac }
 
 _load_gov() {
     if [ -f "$GOV/status" ]; then
@@ -30,13 +32,13 @@ _load_gov() {
                 /system/lib/modules/k6a_gov.ko /vendor/lib/modules/k6a_gov.ko; do
         [ -f "$cand" ] || continue
         seen=1
-        if command -v strings >/dev/null 2>&1; then
-            kv=$(strings "$cand" 2>/dev/null | grep -E '^version=[0-9]+\.[0-9]+\.[0-9]+$' | head -1 | cut -d= -f2)
-            if [ -n "$kv" ] && [ "$kv" != "$GOV_KO_VER" ]; then
-                log "WARN $cand version=$kv, erwartet $GOV_KO_VER — überspringe"
-                continue
+            if command -v strings >/dev/null 2>&1; then
+                kv=$(strings "$cand" 2>/dev/null | grep -E '^version=[0-9]+\.[0-9]+\.[0-9]+$' | head -1 | cut -d= -f2)
+                if [ -n "$kv" ] && ! kver_ok "$kv"; then
+                    log "WARN $cand version=$kv, erwartet ${GOV_KO_VER} (1.5.x) — überspringe"
+                    continue
+                fi
             fi
-        fi
         ko=$cand
         break
     done
@@ -56,8 +58,8 @@ _load_gov() {
     fi
     sleep 1
     gv=$(grep -oE 'version=[^ ]*' "$GOV/status" 2>/dev/null | head -1 | cut -d= -f2)
-    if [ "$gv" != "$GOV_KO_VER" ]; then
-        log "WARN k6a_gov runtime version=${gv:-?}, erwartet $GOV_KO_VER — rmmod"
+    if ! kver_ok "$gv"; then
+        log "WARN k6a_gov runtime version=${gv:-?}, erwartet 1.5.x — rmmod"
         /system/bin/rmmod k6a_gov 2>/dev/null
         return 1
     fi

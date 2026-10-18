@@ -284,3 +284,32 @@ BadaZz89 ([@vandalsquad187](https://github.com/vandalsquad187)) — Kernel & Kon
 Entwickelt und gefestigt in einer langen gemeinsamen Debug-Session: von
 „ein doppeltes `const` tötete die komplette WebUI" bis zu einem validierten
 In-Kernel-Governor-Stack mit 290+ nachgewiesenen Cooldown-Eingriffen.
+
+## 2026-10-18 — v1.4.1: GAMING-Schwellen 96/99/102/93 (BadazzKernel build352)
+
+Messbasis: BadazzKernel-runde r46–r54 (build351, gleiche Karte, NoFan,
+Discharging, eine Runde pro Messung, med180 = validate.py).
+
+| Setup | med180 | k6a-Verhalten |
+|---|---|---|
+| gekappt (1708800), alt显露 Schwellen 93/96/99 | 62,5/58,3/63,0 (Ø 61,3) | gaming 100%, SoC ≤ ~90 °C |
+| uncapped (2304000), Schwellen 93/96/99 | 60,5/66,5/62,0 (Ø 63,0) | SoC max 95 °C, k6a 20–39 % in cd_l2 (p6 → 1708800) |
+| uncapped, Schwellen **96/99/102/93** | **70,2/74,5/77,0 (Ø 73,9)** | **gaming 100 %, p6 100 % @ 2304000, 0 Täler** |
+
+Der +10…+13-fps-Gewinn kommt ausschließlich daraus, dass die Runde
+`gaming` nie verlässt; die alte 93-°C-L2-Schwelle war der eigentliche
+Bremser, nicht die p6-Kappe. r44 (75,7) ist der historische Archetyp
+(jener erste „ashol“ Nim-Lauf ohne CD-Fenster).
+
+### Änderungen in v1.4.1
+- `service.sh`: Version-Lock minor-flexibel (`kver_ok` akzeptiert
+  `1.5.*` statt exakt 1.5.0) — build352 bringt `k6a_gov.ko` 1.5.1,
+  das vorher bei jedem Boot abgewiesen und als Legacy-Fallback
+  übersprungen worden wäre.
+- `settings.conf`: `cd_thresholds=96 99 102 93 …` (auf Gerät bereits
+  gefixt; jetzt auch für frische Modul-Installationen).
+- `k6a-controller`: `_apply_cd_thresholds` **idempotent** — Boot-Write
+  nur noch bei Abweichung, kein stammschutz über thresholds_user, kein
+  unnötiges Überschreiben des GAMING-Defaults aus build352.
+- `gold_cap_gaming` bleibt 1708800 bis zur build352-A/B-Kontrolle
+  (0 vs 1708800, 3 Runden je) — danach Votum über settings.conf.
