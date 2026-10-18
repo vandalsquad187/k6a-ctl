@@ -91,6 +91,7 @@ cpu_apply() { # $1=sil_max $2=gold_max
 
 gpu_limits() { # $1=max_hz ($GPU_MAX = frei)
     w "$GPU/devfreq/max_freq" "${1:-$GPU_MAX}"
+    [ -e "$GPU/max_gpuclk" ] && w "$GPU/max_gpuclk" "${1:-$GPU_MAX}"
 }
 
 # ── governor: init.qcom.post_boot.sh schreibt ein nicht existierendes 'reflex'

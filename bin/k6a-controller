@@ -1,7 +1,8 @@
 #!/system/bin/sh
-# k6a-ctl controller v1.4.1 — delegated thermal management
+# k6a-ctl controller v1.4.2 — delegated thermal management
 # states: DAILY | GAMING (manual switch via settings.conf / WebUI, no auto-detect)
 # tick-sleep: daily=5s gaming=1s
+# v1.4.2: silver_cap_gaming (policy0) + gpu_cap_gaming (kgsl) deckel, Kappe
 
 MODDIR="${1:-/data/adb/modules/k6a-ctl}"
 CONFIG="$MODDIR/config/settings.conf"
@@ -15,8 +16,11 @@ export MODDIR LOG_FILE=$LOG
 
 STATE=""; TICK=0; IDLE=0; _PREV=0; _GAMING_APPLIED=0
 _GM_SET=""; _VP_SET=""
-CFG_DEBUG=0
-CAP_G_RAW=""; CAP_D_RAW=""
+SILCAP_G="0"; GPUCAP_G="0"
+_GOLD_CAP_APPLIED=""; _SIL_CAP_APPLIED=""; _GPU_CAP_APPLIED=""
+    CFG_DEBUG=0
+    CAP_G_RAW=""; CAP_D_RAW=""
+    SILCAP_G_RAW="0"; GPUCAP_G_RAW="0"
 
 # Gold-Cluster-Deckelung: 0 = frei; sonst nächstgelegene OPP ≤ Ziel (F14)
 _norm_cap() { # $1=roh — snappt auf verfügbare OPP, 0 bleibt 0
@@ -46,6 +50,8 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
                 battery_guard) BATT_GUARD=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
                 gold_cap_gaming) CAP_G=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
                 gold_cap_daily) CAP_D=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
+                silver_cap_gaming) SILCAP_G_RAW=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
+                gpu_cap_gaming) GPUCAP_G_RAW=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
                 cd_thresholds) CDT=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
                 debug) CFG_DEBUG=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
             esac
@@ -66,6 +72,8 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
     # _init_freq_tables im _startup, hier ist die Tabelle noch leer (F17)
     case "$CAP_G" in ''|*[!0-9]*) CAP_G=0 ;; esac
     case "$CAP_D" in ''|*[!0-9]*) CAP_D=0 ;; esac
+    case "$SILCAP_G_RAW" in ''|*[!0-9]*) SILCAP_G_RAW=0 ;; esac
+    case "$GPUCAP_G_RAW" in ''|*[!0-9]*) GPUCAP_G_RAW=0 ;; esac
     CAP_G_RAW=$CAP_G; CAP_D_RAW=$CAP_D
     # Erster Aufruf: GOLD_FREQS noch leer → 0; ab _init_freq_tables gültig (F17)
     CAP_G=$(_norm_cap "$CAP_G_RAW"); CAP_D=$(_norm_cap "$CAP_D_RAW")
@@ -144,12 +152,14 @@ _startup() {
     # Caps gegen die frisch gelesene OPP-Tabelle normalisieren — cfg_load lief
     # vor _init_freq_tables, dort war GOLD_FREQS noch leer (F17)
     CAP_G=$(_norm_cap "$CAP_G_RAW"); CAP_D=$(_norm_cap "$CAP_D_RAW")
+    case "$SILCAP_G_RAW" in ''|*[!0-9]*|0) SILCAP_G=0 ;; *) SILCAP_G=$SILCAP_G_RAW; [ "$SILVER_MAX" -gt 0 ] 2>/dev/null && [ "$SILCAP_G" -gt "$SILVER_MAX" ] && SILCAP_G=$SILVER_MAX ;; esac
+    case "$GPUCAP_G_RAW" in ''|*[!0-9]*|0) GPUCAP_G=0 ;; *) GPUCAP_G=$GPUCAP_G_RAW; [ "$GPU_MAX" -gt 0 ] 2>/dev/null && [ "$GPUCAP_G" -gt "$GPU_MAX" ] && GPUCAP_G=$GPU_MAX ;; esac
     _ensure_gov
     # Schwellwerte neu anwenden — sie existieren nur im Sysfs und gehen bei
     # Reboot/Modul-Neustart sonst verloren (2× passiert, F16)
     _apply_cd_thresholds
     _fix_usb_autosuspend
-    log "k6a-ctl v1.4.1 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0})"
+    log "k6a-ctl v1.4.2 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0})"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -260,6 +270,37 @@ _apply_gold_cap() { # $1=Hz (0 = aufheben)
     log "gold_cap → ${want:-off} (p6_max=$cur)"
 }
 
+# ── silver/GPU-deckel (v1.4.2) ──────────────────────────────────────────────
+# 0 = kein Deckel (kgsl/policy0 bleibt auf Boot-Max). Rohwerte werden NICHT
+# auf OPP gerastet — Kernel (cpufreq/devfreq) snapt selbst auf die Tabelle.
+_apply_silver_cap() { # $1=Hz (0 = default)
+    local want cur
+    want="${1:-0}"
+    case "$want" in ''|*[!0-9]*) want=0 ;; esac
+    [ "$SILVER_MAX" -gt 0 ] 2>/dev/null && [ "$want" -gt "$SILVER_MAX" ] && want=$SILVER_MAX
+    [ "$_SIL_CAP_APPLIED" = "$want" ] && return 0
+    if [ "$want" = "0" ]; then
+        w "$P0/scaling_max_freq" "$SILVER_MAX"
+    else
+        w "$P0/scaling_max_freq" "$want"
+    fi
+    cur=$(r "$P0/scaling_max_freq")
+    _SIL_CAP_APPLIED=$want
+    log "silver_cap → ${want:-default} (p0_max=$cur)"
+}
+
+_apply_gpu_cap() { # $1=Hz (0 = default)
+    local want cur
+    want="${1:-0}"
+    case "$want" in ''|*[!0-9]*) want=0 ;; esac
+    [ "$GPU_MAX" -gt 0 ] 2>/dev/null && [ "$want" -gt "$GPU_MAX" ] && want=$GPU_MAX
+    [ "$_GPU_CAP_APPLIED" = "$want" ] && return 0
+    gpu_limits "${want:-$GPU_MAX}"   # gpu_limits schreibt 0 → frei (GPU_MAX)
+    cur=$(r "$GPU/devfreq/max_freq")
+    _GPU_CAP_APPLIED=$want
+    log "gpu_cap → ${want:-default} (kgsl_max=$cur)"
+}
+
 # ── schwellwerte aus settings.conf anwenden ──────────────────────────────────
 # Kernel-Reihenfolge ist fix: l2t l3t l4t rec l2g l3g l4g. rec zuerst schreiben
 # ergibt -EINVAL, still abgelehnt (F15). Idempotent: nur schreiben, wenn sysfs
@@ -281,29 +322,33 @@ _enter_daily() {
     STATE="DAILY"; _GAMING_APPLIED=0; IDLE=0
     _set_game_pid ""
     _apply_gold_cap "$CAP_D"
+    _apply_silver_cap 0
+    _apply_gpu_cap 0
     _apply_schedutil daily
     [ "$_GM_SET" != "0" ] && { setprop persist.sys.game_mode 0 2>/dev/null; _GM_SET=0; }
     if [ "$DELEGATED" = "1" ] && gov_sysfs_exists; then
         gov_write "enable" 0
-        log "-> DAILY (delegated, gov off, gold_cap=${CAP_D:-off})"
+        log "-> DAILY (delegated, gov off, gold_cap=${CAP_D:-off}, silver_cap=default, gpu_cap=default)"
     else
-        log "-> DAILY (legacy, gold_cap=${CAP_D:-off})"
+        log "-> DAILY (legacy, gold_cap=${CAP_D:-off}, silver_cap=default, gpu_cap=default)"
     fi
 }
 
 _enter_gaming() {
     STATE="GAMING"; IDLE=0; _GAMING_APPLIED=0
     _apply_gold_cap "$CAP_G"
+    _apply_silver_cap "$SILCAP_G"
+    _apply_gpu_cap "$GPUCAP_G"
     if [ "$DELEGATED" = "1" ] && gov_sysfs_exists; then
         _apply_cd_thresholds
         gov_write "enable" 1
         _apply_profile "$PROFILE"
         _sync_batt_guard
-        log "-> GAMING (delegated, profile=$PROFILE, gold_cap=${CAP_G:-off})"
+        log "-> GAMING (delegated, profile=$PROFILE, gold_cap=${CAP_G:-off}, silver_cap=${SILCAP_G:-off}, gpu_cap=${GPUCAP_G:-off})"
     else
         cpu_apply "$SILVER_MAX" "$GOLD_MAX"
         gpu_limits "$GPU_MAX"
-        log "-> GAMING (legacy, gold_cap=${CAP_G:-off})"
+        log "-> GAMING (legacy, gold_cap=${CAP_G:-off}, silver_cap=default, gpu_cap=default)"
     fi
 }
 

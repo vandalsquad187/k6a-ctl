@@ -313,3 +313,37 @@ Bremser, nicht die p6-Kappe. r44 (75,7) ist der historische Archetyp
   unnötiges Überschreiben des GAMING-Defaults aus build352.
 - `gold_cap_gaming` bleibt 1708800 bis zur build352-A/B-Kontrolle
   (0 vs 1708800, 3 Runden je) — danach Votum über settings.conf.
+
+## 2026-10-18 — v1.4.2: silver/GPU-Deckel als Runtime-Tunables
+
+Neu in `settings.conf` (Hz; **0 = unverändert** = Boot-Max, Restore beim
+Verlassen des Gaming-State):
+
+```conf
+silver_cap_gaming=0   # policy0 (Silver) während GAMING
+gpu_cap_gaming=0      # kgsl-3d0 devfreq/max_freq + max_gpuclk während GAMING
+```
+
+- `gold_cap_gaming` (seit v1.3) deckelt policy6 (Gold, CPU) — v1.4.2 ergänzt
+  Silver (policy0) und die GPU. Rohwerte werden nicht gerastet: Kernel
+  (cpufreq/devfreq) snapt selbst auf die OPP-Tabelle.
+- `gpu_limits()` schreibt jetzt zusätzlich `kgsl-3d0/max_gpuclk` — mi_thermald
+  besitzt das cooling device `thermal-devfreq-0` (GPU): Unser Write passiert
+  nach dessen Spielbeginn-Init und wird bei jedem State-Wechsel neu gesetzt.
+- Idempotent wie `_apply_gold_cap`: kein Write, kein Log bei unverändertem
+  Wert; `GPUCAP/silver_cap>A-(Boot-Max)` wird auf Io Allowed geklemmt.
+
+**Messbasis v1.4.2** (sweet SD732G, CODM, build352 + Schwellen 96/99/102/93):
+
+| Runde | Config | med180 | late-med | bt max | k6a |
+|---|---|---|---|---|---|
+| r56 | FAN, gpu frei | **82,5** | **69,6** | 32,3 °C | gaming 100 % |
+| r57 | NoFan, gpu frei | 72,0 | 45,6 | 41,7 °C | gaming 100 % |
+| r58 | NoFan, Trip 95→98 °C | 63,8 ↓ | 38,6 ↓ | **45,2 °C** | 17 % cd_l2 |
+
+Eingestelltes Wissen: daemon-seitiges Thermal-Pinning bei ~95 °C ist **nicht
+per sysfs-Trip schraubbar** (Write blieb bestehen, Pinnung blieb) und das
+Erhöhen verschlechtert den Standistäfen — ohne Lüfter muss irgendwo ein
+Deckel mitmachen andernfalls heizt der Akku (bt >45 °C). **Der Lüfter
+erledigt es** — deshalb bleibt `gpu_cap_gaming=0` der Default; 700000000
+ist ein sinnvoller NoFan-Experimentwert (CPU-limitiert, tp besser ~80 °C).
