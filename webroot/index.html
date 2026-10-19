@@ -15,7 +15,8 @@
     <span id="statePill" class="pill">--</span>
 </div>
 
-<div class="card">
+<details class="card" id="dSetup" open>
+    <summary><h2>Einstellungen</h2></summary>
     <div class="row">
         <span class="label">Modus</span>
         <span class="mode-switch">
@@ -33,10 +34,19 @@
         <label class="toggle"><input type="checkbox" id="gcToggle" onchange="setGoldCap(this.checked)">
         <span class="slider"></span></label>
     </div>
-</div>
+    <div class="row">
+        <span class="label">Akku-Guard</span>
+        <label class="toggle"><input type="checkbox" id="battGuardToggle" onchange="setBattGuardEn(this.checked)">
+        <span class="slider"></span></label>
+    </div>
+    <div class="row">
+        <span class="label">Akku-Guard (°C)</span>
+        <span class="val"><input type="number" id="battGuardTemp" class="bw-input" style="width:70px" min="35" max="60" value="45"> <button class="chip" onclick="applyBattGuard()">Set</button></span>
+    </div>
+</details>
 
-<div class="card">
-    <h2>Status</h2>
+<details class="card" id="dStatus" open>
+    <summary><h2>Status</h2></summary>
     <div class="row"><span class="label">Temp</span><span class="val" id="vTemp">--°C</span></div>
     <div class="row"><span class="label">CPU Silver</span><span class="val" id="vSil">-- MHz</span></div>
     <div class="row"><span class="label">CPU Gold</span><span class="val" id="vGold">-- MHz</span></div>
@@ -44,10 +54,10 @@
     <div class="row"><span class="label">Kernel-Governor</span><span class="val" id="vDel">--</span></div>
     <div class="row"><span class="label">Tick</span><span class="val" id="vTick">--</span></div>
     <div class="row"><span class="label">Akku</span><span class="val" id="vBat">--</span></div>
-</div>
+</details>
 
-<div class="card">
-    <h2>Kernel Governor</h2>
+<details class="card" id="dGov" open>
+    <summary><h2>Kernel Governor</h2></summary>
     <div class="row"><span class="label">Version</span><span class="val" id="vGovVer">--</span></div>
     <div class="row"><span class="label">State</span><span class="val" id="vGovState">--</span></div>
     <div class="row"><span class="label">Profil</span><span class="val" id="vGovProfile">--</span></div>
@@ -57,16 +67,10 @@
     <div class="row"><span class="label">Temp-Quelle</span><span class="val" id="vGovTempSrc">--</span></div>
     <div class="row"><span class="label">Build Hash</span><span class="val" id="vGovHash">--</span></div>
     <div class="row"><span class="label">GPU Caps (L2/L3/L4)</span><span class="val" id="vGpuCaps">--</span></div>
-    <div class="row">
-        <span class="label">Akku-Guard</span>
-        <label class="toggle"><input type="checkbox" id="battGuardToggle" onchange="setBattGuardEn(this.checked)">
-        <span class="slider"></span></label>
-    </div>
-    <div class="row"><span class="label">Akku-Guard (°C)</span><span class="val"><input type="number" id="battGuardTemp" class="bw-input" style="width:70px" min="35" max="60" value="45"> <button class="chip" onclick="applyBattGuard()">Set</button></span></div>
-</div>
+</details>
 
-<div class="card">
-    <h2>Bandwidth Floors</h2>
+<details class="card" id="dBw" open>
+    <summary><h2>Bandwidth Floors</h2></summary>
     <div class="bw-grid">
         <div class="bw-header"><span></span><span>L2</span><span>L3</span><span>L4</span></div>
         <div class="bw-row">
@@ -86,17 +90,61 @@
         <button class="chip active" onclick="applyBwFloors()">Apply</button>
         <button class="chip" onclick="resetBwFloors()">Reset</button>
     </div>
-</div>
+</details>
 
-<div class="card">
-    <h2>History (letzte 15)</h2>
+<details class="card" id="dHist" open>
+    <summary><h2>History (letzte 15)</h2></summary>
     <table class="hist-table">
         <thead><tr><th>Zeit</th><th>Temp</th><th>Transition</th></tr></thead>
         <tbody id="histBody"></tbody>
     </table>
-</div>
+</details>
 
 <div id="toast"></div>
+
+<button id="btnSettings" class="fab" onclick="openSettings()" aria-label="Settings">⚙</button>
+
+<div id="settingsPanel" class="settings-panel" hidden>
+    <div class="sp-head">
+        <h2>Settings</h2>
+        <button class="chip" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="row">
+        <span class="label">Theme</span>
+        <span class="mode-switch" id="themeSwitch">
+            <button class="chip ts-btn" data-th="github" onclick="setTheme('github')">GitHub</button>
+            <button class="chip ts-btn" data-th="vscode" onclick="setTheme('vscode')">VS Code</button>
+            <button class="chip ts-btn" data-th="dracula" onclick="setTheme('dracula')">Dracula</button>
+        </span>
+    </div>
+    <div class="row">
+        <span class="label">Hintergrund</span>
+        <input type="file" id="bgPick" accept="image/*" onchange="setBg(this.files[0])" style="display:none">
+        <button class="chip" onclick="pickBg()">Bild wählen</button>
+    </div>
+    <div class="row">
+        <span class="label">Hintergrund-URL</span>
+        <span class="val"><input type="text" id="bgUrl" class="bw-input" style="width:130px" placeholder="https://...jpg">
+        <button class="chip" onclick="setBgUrl()">Set</button></span>
+    </div>
+    <div class="row sp-hint"><span class="label">Tipp: alternativ bg.jpg nach webroot/ legen (geräteseitig, immer)</span></div>
+    <div class="row">
+        <span class="label">Kachel-Transparenz</span>
+        <input type="range" id="bgAlpha" class="alpha-slide" min="10" max="100" value="100" oninput="setBgAlpha(this.value)">
+    </div>
+    <div class="row">
+        <span class="label">Reset</span>
+        <button class="chip" onclick="resetSettings()">Reset</button>
+    </div>
+    <div class="row">
+        <span class="label">Updates</span>
+        <span class="val"><span id="vUpd">--</span> <button class="chip" onclick="checkUpdates()">Check</button></span>
+    </div>
+    <div class="row">
+        <span class="label">Fullscreen</span>
+        <span class="val"><span id="vFs">aus</span> <button class="chip" onclick="toggleFs()">An/Aus</button></span>
+    </div>
+</div>
 </div>
 <script src="app.js"></script>
 </body>

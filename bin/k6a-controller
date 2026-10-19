@@ -403,6 +403,31 @@ _write_data() {
         gtv=$(echo "$_st" | grep -oE "temp_valid=[01]" | head -1 | cut -d= -f2)
         gbg=$(gov_read "battery_guard" 2>/dev/null | tr -d ' \n\r\t')
         gpid=$(gov_read "game_pid" 2>/dev/null | tr -d ' \n\r\t')
+        # Hist-Ring (v1.4.4): Kernel-State-Wechsel selbst erkennen —
+        # Kernel liefert nur die letzte Transition (hist=…), wir halten 15.
+        local _hf="$MODDIR/run/webhist.txt" _lsf="$MODDIR/run/webhist.last"
+        local _prev
+        _prev=$(r "$_lsf" 2>/dev/null)
+        if [ -n "$gs" ]; then
+            if [ -n "$_prev" ] && [ "$gs" != "$_prev" ]; then
+                printf '%s:%s:%s>%s\n' "$(date +%s)" "$t" "$_prev" "$gs" >> "$_hf" 2>/dev/null
+            fi
+            if [ ! -s "$_hf" ] && [ -n "$ghe" ]; then
+                printf '%s\n' "$ghe" > "$_hf" 2>/dev/null
+                printf '%s\n' "$gs" > "$_lsf" 2>/dev/null
+            fi
+            printf '%s\n' "$gs" > "$_lsf" 2>/dev/null
+            # auf 15 Eintraege kappen
+            local _n _keep
+            _n=$(wc -l < "$_hf" 2>/dev/null) || _n=0
+            if [ "$_n" -gt 15 ] 2>/dev/null; then
+                _keep=$(tail -n 15 "$_hf" 2>/dev/null)
+                [ -n "$_keep" ] && printf '%s\n' "$_keep" > "$_hf" 2>/dev/null
+            fi
+        fi
+        if [ -s "$_hf" ]; then
+            ghe=$(cat "$_hf" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+        fi
     fi
 
     cat > "${DATA}.tmp" << EOF
@@ -430,6 +455,7 @@ gov_gpu_caps=$gpc
 gov_bw_gpubw=$gbw
 gov_bw_llcc=$gbl
 gov_hist=$ghe
+modver=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null)
 gov_batt_temp=$gbt
 gov_policy_max=$gpm
 gov_state_age=$gas

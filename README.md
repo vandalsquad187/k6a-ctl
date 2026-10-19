@@ -74,15 +74,15 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 
 ```
 k6a-ctl/
-├── module.prop              id=k6a-ctl, v1.4.0
+├── module.prop              id=k6a-ctl, v1.4.4
 ├── service.sh               k6a_gov.ko laden (Version-Lock) + Watchdog + WebUI-Spawn
 ├── build.sh                 Gate-Pflicht + ZIP-Assembly
 ├── bin/
 │   ├── check_module.sh      Build-Gate: Checks vor jedem Zip
 │   ├── k6a-lib.sh           schlanke HW-Schicht: unalias r, dynamische Tables, Zonen
-│   ├── k6a-controller       State Machine DAILY/GAMING + Gold-Cap + Schwellwerte
+│   ├── k6a-controller       State Machine DAILY/GAMING + gold/silver/gpu-Deckel (idempotent) + Schwellwerte
 │   ├── webui-server.sh      nc-Listener :8767 (127.0.0.1 only)
-│   └── webui-handler.sh     Whitelist-Request-Handler (/mode /thermal /ping)
+│   └── webui-handler.sh     Whitelist-Request-Handler (/mode /thermal /goldcap /profile /delegated /bw_floors /battguard /ping)
 ├── config/settings.conf     EINZIGE Quelle der Wahrheit (hot-reload)
 └── webroot/
     ├── index.html           Markup
@@ -214,12 +214,14 @@ seit v1.0.6 macht der Kernel bewusst **CPU-only**.
 | Key | Default | Bedeutung |
 |-----|---------|-----------|
 | `mode` | `gaming` | `gaming` / `daily` — einziger Schalter, sonst nichts |
-| `thermal_protect` | `on` | `on` / `off` |
+| `thermal_protect` | `on` | v1.4.3 **wirksam**: `on` = Gaming-Deckel aktiv (gold/silver/gpu per settings.conf), `off` = Deckel pausiert (→ Boot-Max); `battery_guard`, `auto_badazz_switch`, `cd_thresholds` bleiben unabhängig aktiv |
 | `delegated` | `1` | `1` = Kernel-Governor erzwingt (`legacy=1`), `0` = reines Userspace (`legacy=0`) |
 | `profile` | `custom` | `gaming` / `battery` / `badazz` / `badazz_safe` / `custom` — `custom` behält die `cd_thresholds` |
-| `gold_cap_gaming` | 1708800 | Gold-Cluster-Deckelung im Gaming-Modus (Hz, `0` = frei) |
+| `gold_cap_gaming` | 1708800 | Gold-Cluster-Deckelung im Gaming-Modus (Hz, `0` = frei) — WebUI-Toggle „Gold-Cap 1708/2304" |
+| `silver_cap_gaming` | 0 | v1.4.2: Silver-Cluster (policy0) Deckel während GAMING (Hz, `0` = Boot-Max) |
+| `gpu_cap_gaming` | 0 | v1.4.2: GPU (kgsl `devfreq/max_freq` + `max_gpuclk`) Deckel während GAMING (Hz, `0` = Boot-Max 800 MHz) |
 | `gold_cap_daily` | 1555200 | dasselbe im Daily-Modus |
-| `cd_thresholds` | 93 96 99 90 1708800 1555200 1324800 | `l2t l3t l4t rec l2g l3g l4g` — Reihenfolge kernel-fix, wird beim Start angewendet |
+| `cd_thresholds` | 96 99 102 93 1708800 1555200 1324800 | `l2t l3t l4t rec l2g l3g l4g` — Reihenfolge kernel-fix, wird beim Start idempotent angewendet (seit build352 = Kernel-GAMING-Default) |
 | `game_pkg` | CODM | Package für renice/oom-Boost |
 | `battery_guard` | `on` | Akku-Guard an/aus → `/sys/kernel/k6a_gov/battery_guard` (0/1) |
 | `battery_guard_temp` | 45 | Akku-Guard-Schwelle (35–60 °C) |
@@ -233,6 +235,13 @@ seit v1.0.6 macht der Kernel bewusst **CPU-only**.
 ```sh
 # Mode via localhost-endpoint
 printf 'GET /mode?m=gaming HTTP/1.0\r\n\r\n' | nc 127.0.0.1 8767
+
+# Gold-Cap-Toggle (v1.4.3): on = 1708800, off = 0 (=2304 frei)
+printf 'GET /goldcap?g=on HTTP/1.0\r\n\r\n' | nc 127.0.0.1 8767
+printf 'GET /goldcap?g=off HTTP/1.0\r\n\r\n' | nc 127.0.0.1 8767
+
+# Thermal-Protect (v1.4.3 wirksam): Deckel aktiv/pausiert
+printf 'GET /thermal?t=on HTTP/1.0\r\n\r\n' | nc 127.0.0.1 8767
 
 # Akku-Guard: Schwelle 35..60 °C bzw. an/aus
 printf 'GET /battguard?t=48 HTTP/1.0\r\n\r\n' | nc 127.0.0.1 8767
@@ -347,6 +356,45 @@ Erhöhen verschlechtert den Standistäfen — ohne Lüfter muss irgendwo ein
 Deckel mitmachen andernfalls heizt der Akku (bt >45 °C). **Der Lüfter
 erledigt es** — deshalb bleibt `gpu_cap_gaming=0` der Default; 700000000
 ist ein sinnvoller NoFan-Experimentwert (CPU-limitiert, tp besser ~80 °C).
+
+## 2026-10-18 — v1.4.4: Aufklappbare Kacheln + History-Ring + Settings-Panel
+
+**UI/UX:**
+- **Status- & Kernel-Governor-Kachel** auf-/zuklappbar (`<details>`/`<summary>`);
+  Pfeil (groß, rechts) dreht beim Zuklappen, Zustand per `localStorage`.
+- **Akku-Guard + Akku-Guard(°C)** in die Toggle-Karte verschoben (unter
+  Thermal-Schutz/Gold-Cap) — Governor-Karte nur noch Lesezeilen.
+- **Settings-Button (⚙, rechts unten)** mit Panel: Theme-Picker
+  (`github`/`vscode`/`dracula`, per `data-theme` CSS-Variablen),
+  Hintergrundbild + Kachel-Transparenz (Slider, `localStorage`-Persistenz),
+  Reset, **Check-Updates** (Vergleich `module.version` vs. GitHub-raw;
+  dazu schreibt die ctl jetzt `modver` in `data.txt`), Fullscreen.
+- **WebUI-Härting:** service.sh spawnt webui nur noch, wenn `:8767` frei ist
+  (belegt-check via `/proc/net/tcp`), kein Doppelspawn bei leerer pid-Datei.
+
+**Bugfix:**
+- **History funktionierte nicht richtig** — der Kernel liefert in `status`
+  nur die **letzte** Transition; die ctl erkannte Kernels-State-Änderungen
+  pro Tick jetzt selbst und hält einen 15er-Ring (`run/webhist.txt`), der
+  in `data.txt` als `gov_hist` landet (Live:getestet: Daily/→Gaming-Flip
+  = 3 Zeilen).
+
+**Analyse-Nachtrag (Code-Verifizierung):** `thermal_protect` steuert nur
+die drei statischen ctl-Deckel; der **Akku-Guard** ist Kernel-intern und
+hart: bt ≥45 °C → CD_L2-Zwang (p6 1708800, GPU 800 MHz) **inkl. Blockade
+des CD-Ladder-Exits** bis bt <40 °C (−5 K). `profile=custom` ⇒
+`auto_badazz_switch` inaktiv.
+
+**Messbasis v1.4.4** (build353, Gold-Cap-Verifikation unter Lüfter):
+
+| Runde | Config | med180 | late-med | k6a |
+|---|---|---|---|---|
+| r56 | FAN, gpu+Cap frei | **82,5** | **69,6** | gaming 100 % |
+| r59d | FAN, Gold-Cap 1708800 | 60,1 | 53,1 | gaming 100 % |
+
+⇒ Empfehlung: **Lüfter AN, Gold-Cap AUS** für CODM — der Cap kostet im
+FAN-Regime ~15–22 fps und bringt keine Bonus-Coolness vs. den Lüfter.
+Der UI-Toggle bleibt als Backup-Modus (Akku, extrem-Hitze) praktikabel.
 
 ## 2026-10-18 — v1.4.3: Gold-Cap-UI-Toggle + thermal_protect wirksam
 
