@@ -80,16 +80,20 @@ log "service start"
 # ── webui-server (einmalig, stale-guard + belegt-check) ─────────────────────
 (
     PIDF=$MODDIR/run/webui.pid
-    if [ -f "$PIDF" ]; then
-        OLD=$(cat "$PIDF" 2>/dev/null)
-        if [ -n "$OLD" ] && [ -d "/proc/$OLD" ]; then OLD_C=$(tr '\0' ' ' < "/proc/$OLD/cmdline" 2>/dev/null); case "$OLD_C" in *webui-server*) OLD="" ;; esac; fi
-        [ -n "$OLD" ] && rm -f "$PIDF"
-    fi
-    # v1.4.4: :8767 bereits belegt? (leere pid-datei oder fremder listener)
-    if grep -qi ':223F[[:space:]]' /proc/net/tcp 2>/dev/null; then
-        printf '[$(date "+%%H:%%M:%%S")] [SVC] webui :8767 bereits belegt — kein doppel-spawn\n' >> "$LOG" 2>/dev/null
-    elif ! [ -d "/proc/$(cat "$PIDF" 2>/dev/null)" ]; then
-        setsid sh "$MODDIR/bin/webui-server.sh" >/dev/null 2>&1 </dev/null &
+    _ui_alive() {
+        local p
+        p=$(cat "$PIDF" 2>/dev/null)
+        [ -n "$p" ] && [ -d "/proc/$p" ] && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q webui-server
+    }
+    if _ui_alive; then
+        : # laeuft bereits — nichts tun
+    else
+        rm -f "$PIDF"
+        if grep -qi ':223F[[:space:]]' /proc/net/tcp 2>/dev/null; then
+            log "webui :8767 belegt (fremd) — kein spawn"
+        else
+            setsid sh "$MODDIR/bin/webui-server.sh" >/dev/null 2>&1 </dev/null &
+        fi
     fi
 ) &
 

@@ -1,9 +1,10 @@
 #!/system/bin/sh
-# k6a-ctl controller v1.4.3 — delegated thermal management
+# k6a-ctl controller v1.4.5 — delegated thermal management
 # states: DAILY | GAMING (manual switch via settings.conf / WebUI, no auto-detect)
 # tick-sleep: daily=5s gaming=1s
 # v1.4.2: silver_cap_gaming (policy0) + gpu_cap_gaming (kgsl) deckel, Kappe
 # v1.4.3: thermal_protect wirksam (on=Deckel/mäß, off=Deckel pausiert); Gold-Cap-UI-Toggle
+# v1.4.5: webui-watchdog (respawn, wenn webui-server-wrapper tot)
 
 MODDIR="${1:-/data/adb/modules/k6a-ctl}"
 CONFIG="$MODDIR/config/settings.conf"
@@ -161,7 +162,7 @@ _startup() {
     # Reboot/Modul-Neustart sonst verloren (2× passiert, F16)
     _apply_cd_thresholds
     _fix_usb_autosuspend
-    log "k6a-ctl v1.4.3 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0})"
+    log "k6a-ctl v1.4.5 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0})"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -499,6 +500,15 @@ while true; do
     fi
 
     _write_data "$TEMP_NOW"
+    # webui-watchdog (v1.4.5): alle 30 ticks — wrapper tot? → respawn
+    [ $(( TICK % 30 )) -eq 0 ] && {
+        _WP=$(cat "$MODDIR/run/webui.pid" 2>/dev/null)
+        if ! { [ -n "$_WP" ] && [ -d "/proc/$_WP" ] && tr '\0' ' ' < "/proc/$_WP/cmdline" 2>/dev/null | grep -q webui-server; }; then
+            rm -f "$MODDIR/run/webui.pid"
+            setsid sh "$MODDIR/bin/webui-server.sh" >/dev/null 2>&1 </dev/null &
+            log "webui respawn (wrapper tot, TICK=$TICK)"
+        fi
+    }
     TICK=$(( TICK + 1 ))
     [ $(( TICK % 60 )) -eq 0 ] && { _sync_batt_guard; log "hb tick=$TICK state=$STATE temp=${TEMP_NOW:--} delegated=$DELEGATED"; }
     sleep $SLEEP
