@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# k6a-ctl controller v1.4.5 — delegated thermal management
+# k6a-ctl controller v1.4.6 — delegated thermal management
 # states: DAILY | GAMING (manual switch via settings.conf / WebUI, no auto-detect)
 # tick-sleep: daily=5s gaming=1s
 # v1.4.2: silver_cap_gaming (policy0) + gpu_cap_gaming (kgsl) deckel, Kappe
@@ -162,7 +162,7 @@ _startup() {
     # Reboot/Modul-Neustart sonst verloren (2× passiert, F16)
     _apply_cd_thresholds
     _fix_usb_autosuspend
-    log "k6a-ctl v1.4.5 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0})"
+    log "k6a-ctl v1.4.6 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0})"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -326,8 +326,10 @@ _apply_cd_thresholds() {
 # auto_badazz_switch und cd_thresholds bleiben UNABHÄNGIG davon — das sind
 # die eigentlichen Kernel-Schutzschichten.
 _apply_caps_gaming() {
-    [ "$_THP_APPLIED" = "$THP" ] && return 0
-    _THP_APPLIED=$THP
+    # v1.4.6: Guard muss auf Cap-Waerten reagieren (THP-only liess Gold-Cap-Toggle
+    # unsichtbar werden — Kernel blieb auf Boot-Max, UI zeigte 2304)
+    [ "$_THP_APPLIED" = "${THP}|${CAP_G:-0}|${SILCAP_G:-0}|${GPUCAP_G:-0}" ] && return 0
+    _THP_APPLIED="${THP}|${CAP_G:-0}|${SILCAP_G:-0}|${GPUCAP_G:-0}"
     if [ "$THP" = "off" ]; then
         _apply_gold_cap 0; _apply_silver_cap 0; _apply_gpu_cap 0
         log "thermal_protect=off → Gaming-Deckel pausiert (gold/silver/gpu = Boot-Max)"
