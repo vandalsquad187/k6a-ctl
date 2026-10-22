@@ -18,9 +18,9 @@ chmod 755 "$MODDIR/bin/k6a-controller" "$MODDIR/bin/webui-server.sh" "$MODDIR/bi
 
 # ── k6a_gov.ko laden (CONFIG_K6A_GOV=m ab Badazz Build 341) ──────────────────
 GOV=/sys/kernel/k6a_gov
-GOV_KO_VER=1.5.1
+GOV_KO_VER=1.6.1
 
-kver_ok() { case "${1:-}" in 1.5.*) return 0 ;; *) return 1 ;; esac }
+kver_ok() { case "${1:-}" in 1.5.*|1.6.*) return 0 ;; *) return 1 ;; esac }
 
 _load_gov() {
     if [ -f "$GOV/status" ]; then
@@ -35,7 +35,7 @@ _load_gov() {
             if command -v strings >/dev/null 2>&1; then
                 kv=$(strings "$cand" 2>/dev/null | grep -E '^version=[0-9]+\.[0-9]+\.[0-9]+$' | head -1 | cut -d= -f2)
                 if [ -n "$kv" ] && ! kver_ok "$kv"; then
-                    log "WARN $cand version=$kv, erwartet ${GOV_KO_VER} (1.5.x) — überspringe"
+                    log "WARN $cand version=$kv, erwartet ${GOV_KO_VER} (1.5.x|1.6.x) — überspringe"
                     continue
                 fi
             fi
