@@ -168,7 +168,7 @@ _startup() {
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
         log "k6a_gov ${gv:-unbekannt} legacy=$(gov_read "legacy" 2>/dev/null | tr -d ' \n\r\t')"
         case "$gv" in
-            1.5.*) ;;
+            1.5.*|1.6.*) ;;
             "") warn "k6a_gov status ohne version — Build 341 (1.5.0) erwartet" ;;
             *) warn "k6a_gov $gv — ab Build 341 (1.5.0): CONFIG_K6A_GOV=m als Modul plus hash_state" ;;
         esac
