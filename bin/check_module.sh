@@ -14,7 +14,7 @@ echo "════════════════════════�
 
 # ── 1/6 Shell-Syntax ────────────────────────────────────────────────────────
 echo "[1] Shell-Syntax"
-for f in "$MOD"/service.sh "$MOD"/bin/*.sh "$MOD"/bin/k6a-controller; do
+for f in "$MOD"/service.sh "$MOD"/customize.sh "$MOD"/bin/*.sh "$MOD"/bin/k6a-controller; do
     [ -f "$f" ] || continue
     if sh -n "$f" 2>/dev/null; then _pass "$(basename "$f")"; else _fail "$(basename "$f") Syntaxfehler"; fi
 done
