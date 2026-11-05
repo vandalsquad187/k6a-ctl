@@ -607,8 +607,10 @@ while true; do
         if [ "$STATE" = "GAMING" ]; then
             _nowa=$(date +%s)
             [ $(( _nowa - _AUTO_LAST )) -gt 10 ] && _enter_daily
-        else
-            [ "$_AUTO_HIT" -ge 2 ] && _enter_gaming
+        elif [ "$_AUTO_HIT" -ge 2 ]; then
+            _enter_gaming
+        elif [ "$STATE" != "DAILY" ]; then
+            _enter_daily
         fi
     else
         [ "$STATE" != "DAILY" ] && _enter_daily
