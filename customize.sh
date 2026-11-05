@@ -4,7 +4,7 @@ SKIPUNZIP=0
 
 V=$(grep -m1 '^version=' "$ZIPPATH/module.prop" 2>/dev/null | cut -d= -f2 | tr -d ' \r')
 [ -z "$V" ] && V=$(grep -m1 '^version=' ./module.prop 2>/dev/null | cut -d= -f2 | tr -d ' \r')
-[ -z "$V" ] && V="1.4.8"
+[ -z "$V" ] && V="1.4.9"
 
 ui_print " ========================================"
 ui_print " ██████╗  █████╗  ██████╗  █████╗ ███████╗███████╗"

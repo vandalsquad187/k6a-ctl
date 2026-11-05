@@ -1,6 +1,8 @@
 #!/system/bin/sh
 # k6a-ctl webui handler — whitelisted endpoints only, one shot per connection
+# v1.4.9: token-gate (config/webui.token, root-only) für alle state-changing routes
 CONF="$(cd "$(dirname "$0")/.." && pwd)/config/settings.conf"
+TOKENF="$(dirname "$CONF")/webui.token"
 
 read -r REQ
 # REQ: GET /endpoint?k=v HTTP/1.x
@@ -9,10 +11,23 @@ PATHQ=${REST%% *}
 P=${PATHQ%%\?*}
 Q=${PATHQ#*\?}
 [ "$Q" = "$PATHQ" ] && Q=""
+_QFULL=$Q
 Q=${Q%%&*}
 
 ok()  { printf 'HTTP/1.0 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK'; }
 bad() { printf 'HTTP/1.0 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'; }
+forbidden() { printf 'HTTP/1.0 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'; }
+
+_auth_or_bad() { # k=<token> verpflichtend an jeder state-changing route
+    _got=""
+    case "$_QFULL" in
+        *k=*) _got=${_QFULL#*k=}; _got=${_got%%&*} ;;
+    esac
+    _ref=$(tr -d '\r\n \t' < "$TOKENF" 2>/dev/null) || _ref=""
+    [ -n "$_ref" ] && [ "$_got" = "$_ref" ] && return 0
+    forbidden
+    exit 1
+}
 
 setcfg() {
     local k="$1" v="$2" tmp
@@ -24,8 +39,7 @@ setcfg() {
         cat "$CONF" > "$tmp" 2>/dev/null
         printf '%s=%s\n' "$k" "$v" >> "$tmp"
     fi
-    cat "$tmp" > "$CONF" 2>/dev/null
-    rm -f "$tmp"
+    mv -f "$tmp" "$CONF" 2>/dev/null || { cat "$tmp" > "$CONF" 2>/dev/null; rm -f "$tmp"; }
 }
 bw_set() {
     local vals="$1" a b c d e f
@@ -58,32 +72,38 @@ esac
 
 case "$P" in
     /mode)
+_auth_or_bad
         case "$Q" in
-            m=gaming|m=daily) setcfg mode "${Q#m=}"; ok ;;
+            m=gaming|m=daily|m=auto) setcfg mode "${Q#m=}"; ok ;;
             *) bad ;;
         esac ;;
     /thermal)
+_auth_or_bad
         case "$Q" in
             t=on|t=off) setcfg thermal_protect "${Q#t=}"; ok ;;
             *) bad ;;
         esac ;;
     /goldcap)
+_auth_or_bad
         case "$Q" in
             g=on) setcfg gold_cap_gaming 1708800; ok ;;
             g=off) setcfg gold_cap_gaming 0; ok ;;
             *) bad ;;
         esac ;;
     /profile)
+_auth_or_bad
         case "$Q" in
             p=gaming|p=battery|p=badazz|p=badazz_safe|p=custom|p=off) setcfg profile "${Q#p=}"; ok ;;
             *) bad ;;
         esac ;;
     /delegated)
+_auth_or_bad
         case "$Q" in
             d=0|d=1) setcfg delegated "${Q#d=}"; ok ;;
             *) bad ;;
         esac ;;
     /bw_floors)
+_auth_or_bad
         case "$Q" in
             bw=* )
                 vals="${Q#bw=}"
@@ -91,6 +111,7 @@ case "$P" in
             *) bad ;;
         esac ;;
     /battguard)
+_auth_or_bad
         case "$Q" in
             t=* )
                 v="${Q#t=}"

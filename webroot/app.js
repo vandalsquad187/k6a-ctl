@@ -1,4 +1,5 @@
-// k6a-ctl app.js v1.3.2
+// k6a-ctl app.js v1.3.2 (token-aware; KTOKEN wird von service.sh befüllt)
+const KTOKEN='';
 var d = {};
 var _toastT = null;
 
@@ -12,7 +13,8 @@ try{if(window.KernelSU&&window.KernelSU.exec){window.KernelSU.exec(cmd,'',functi
 }
 
 function api(path) {
-    new Image().src = 'http://127.0.0.1:8767' + path + '&t=' + Date.now();
+    var sep = path.indexOf('?') === -1 ? '?' : '&';
+    new Image().src = 'http://127.0.0.1:8767' + path + sep + 'k=' + KTOKEN + '&t=' + Date.now();
 }
 
 function toast(msg) {
@@ -89,7 +91,7 @@ function applyBwFloors() {
         l.push(String(nb));
     }
     var path = '/bw_floors?bw=' + g.concat(l).join('_');
-    new Image().src = 'http://127.0.0.1:8767' + path + '&t=' + Date.now();
+    api(path);
     toast('BW-Floors gesendet');
     setTimeout(fetchData, 800);
 }

@@ -15,9 +15,10 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 
 ## Features
 
-- **Zwei Modi, sonst nichts** — `daily` (Akku schonen) ↔ `gaming` (Leistung),
-  per WebUI `/mode?m=…` oder Config. Keine Auto-Spielerkennung, jeder Modus
-  ist ein stimmiges Gesamtpaket
+- **Drei Modi** — `daily` (Akku schonen) ↔ `gaming` (Leistung) ↔ `auto`
+  (Spielerkennung: `pidof` + `/proc/<pid>/cgroup` top-app-Zugehörigkeit;
+  Hysterese 2 Bestätigungs-Ticks rein, 10 s ohne top-app raus → `daily`),
+  per WebUI `/mode?m=…` oder Config
 - **Gold-Cluster-Deckelung pro Modus** — `gold_cap_gaming` / `gold_cap_daily`
   begrenzen `scaling_max_freq` der A76 auf die nächstgelegene verfügbare OPP.
   Kernbefund 2026-10 (COD Mobile, SD732G): die Last ist bandbreiten-/wärmelimitiert,
@@ -34,8 +35,9 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 - **Auto-Ladung des Governors** — `service.sh` hängt `k6a_gov.ko` per `insmod`
   (Suchreihenfolge Modulordner → `/data/adb` → `/system/lib/modules` →
   `/vendor/lib/modules`) und fällt bei jedem Fehler still auf den Legacy-Cooldown zurück
-- **Version-Lock** — `GOV_KO_VER` in `service.sh` und die `1.5.*`-Erwartung im Controller
-  sind gepaart und vom Gate erzwungen; weicht die `version=` des `.ko` bzw. der
+- **Version-Lock (dynamisch)** — `service.sh` (Loader) und der Controller-Runtime-Check
+  akzeptieren k6a_gov 1.5.x–1.9.x (`kver_ok` `1.[5-9].*`); GOV_KO_VER ist nur noch
+  Protokollausgabe. Vom Gate erzwungen; weicht die `version=` des `.ko` bzw. der
   geladenen Laufzeit ab, wird nicht geladen (bzw. `rmmod`)
 - **Hash-Status statt Bool** — `hash_state` (0 pending / 1 verified / 2 mismatch /
   3 nicht geprüft) aus `/sys/kernel/k6a_gov/status`, in `data.txt` und WebUI gespiegelt;
@@ -293,6 +295,41 @@ BadaZz89 ([@vandalsquad187](https://github.com/vandalsquad187)) — Kernel & Kon
 Entwickelt und gefestigt in einer langen gemeinsamen Debug-Session: von
 „ein doppeltes `const` tötete die komplette WebUI" bis zu einem validierten
 In-Kernel-Governor-Stack mit 290+ nachgewiesenen Cooldown-Eingriffen.
+
+## 2026-11-05 — v1.4.9: Token-Gate, Fork-Diet, mode=auto, P4-Watchdog (Review-Runde)
+
+Reviewer-Runde 2026-11 (5 Befunde, alle umgesetzt, am Gerät live verifiziert):
+
+### Änderungen in v1.4.9
+- **WebUI Token-Gate** (Befund 2): jede app mit INTERNET-Recht konnte
+  127.0.0.1:8767 nutzen (Android-Loopback ist app-geteilt). Jetzt:
+  `config/webui.token` (root-only, 32 hex, per service.sh gelegt), `&k=`
+  an alle state-changing Routen; `/ping` und `data.txt` bleiben reine Lese-Zugänge
+- **setcfg atomar** (Befund 4): `cat tmp > CONF` → `mv -f tmp CONF`
+  (kein Event mehr, bei dem der Controller halbe Configs einliest)
+- **Fork-Diet** (Befund 3): ~100 procs/s im Gaming-Tick war Bandbreiten- und
+  Wärme-Frachtkosten im Controller selbst. Jetzt: Status-while-read direkt
+  aus der Node (0 forks), `cfg_load` nur bei geänderter settings.conf
+  (stat-Signatur), direkte Node-Reads (`read < node`) für scaling_cur/battery/
+  profile/gpu_caps/battery_guard/game_pid, `nice 0`, `data.txt`-Takt 2 s
+  (gaming; daily 5 s; force-write bei State-Wechsel)
+- **mode=auto** (Befund 5): `pidof $PKG` + `/proc/<pid>/cgroup` top-app-Zugehörigkeit
+  (0 fork path via `read`-Kette) + Hysterese: 2 Bestätigungs-Ticks → `_enter_gaming`,
+  10 s ohne top-app → `_enter_daily` incl. oom-reset sauber
+- **P4-Stale-Watchdog** (aus 2026-11-01-Deployment in den Tree): 5 Ticks ohne
+  `state_age_ms`-Fortschritt bei delegiertem Gaming-Tick → `enable=0`,
+  einmal `rmmod+insmod+Re-Apply` → `enable=1`; daneben 60-Tick-Heartbeat
+- **controller oom_adj -17 Restria**: dokumentiert (kontrollierte LMK-Immunität
+  während GAMING; Reset beim DAILY-Wechsel)
+
+### Am Gerät verifiziert (2026-11-05)
+- `/ping` ohne Token 200; `/mode`/`/profile`/flasch-Token 403; valides Token 200
+- `mode=auto`: `-> DAILY` 8 s nach dem Modus-Switch (enable=0, game_pid=0)
+- `data.txt`-Takt: ~2 s statt 1 s (mtimes 109→111→115 s)
+- Sysfs-Arm (R3-A-Profil): thresholds `96 99 102 93 1708800 1555200 1324800`,
+  gpu_caps `585000000 430000000 305000000`, hysteresis `fast=500 normal=2000`,
+  battery_guard_temp `47`/guard `off`
+- on-device `sh -n` über controller/handler/service grün
 
 ## 2026-10-18 — v1.4.1: GAMING-Schwellen 96/99/102/93 (BadazzKernel build352)
 

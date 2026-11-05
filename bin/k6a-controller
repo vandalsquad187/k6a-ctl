@@ -1,6 +1,12 @@
 #!/system/bin/sh
-# k6a-ctl controller v1.4.6 — delegated thermal management
-# states: DAILY | GAMING (manual switch via settings.conf / WebUI, no auto-detect)
+# k6a-ctl controller v1.4.9 — delegated thermal management
+# states: DAILY | GAMING
+# v1.4.9: (a) mode=auto — pidof + /proc/<pid>/cgroup top-app + Hysterese
+#   (2 Bestaetigungs-Ticks rein, 10s ohne top-app raus -> DAILY); mode=gaming
+#   bleibt als Dauer-Test-Art (enable=1). (b) Status-Parsen ohne forks
+#   (while-read direkt aus der status-Node). (c) cfg_load nur bei geaenderter
+#   settings.conf (stat-Signatur). (d) data.txt-Takt: gaming 2s, sonst 5s +
+#   Force-Write bei State-Wechsel. (e) zero-fork-reads in _write_data.
 # tick-sleep: daily=5s gaming=1s
 # v1.4.2: silver_cap_gaming (policy0) + gpu_cap_gaming (kgsl) deckel, Kappe
 # v1.4.3: thermal_protect wirksam (on=Deckel/mäß, off=Deckel pausiert); Gold-Cap-UI-Toggle
@@ -17,7 +23,12 @@ export MODDIR LOG_FILE=$LOG
 . "$MODDIR/bin/k6a-lib.sh"
 
 STATE=""; TICK=0; IDLE=0; _PREV=0; _GAMING_APPLIED=0
+_STE_PREV=""; _STE_N=0; _STE_TRIED=0
 _GM_SET=""; _VP_SET=""
+_FORCE_DATA=0; _CFG_SIG="__unset__"; _MODVER=""
+_AUTO_PID=""; _AUTO_HIT=0; _AUTO_LAST=0; _HIST=""; _lsf_state=""
+_STV=""; _SSTATE=""; _STEMP=""; _STHROT=""; _SPMAX=""; _SAGE=""; _SVSRC=""; _SVVAL=""
+_SHASHV=""; _SHASHS=""; _SBW1=""; _SBW2=""; _SHIST=""
 SILCAP_G="0"; GPUCAP_G="0"
 _GOLD_CAP_APPLIED=""; _SIL_CAP_APPLIED=""; _GPU_CAP_APPLIED=""
 _THP_APPLIED=""
@@ -60,7 +71,7 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
             esac
         done < "$CONFIG" 2>/dev/null
     fi
-    [ "$MODE" = "gaming" ] || MODE="daily"
+    [ "$MODE" = "gaming" ] || [ "$MODE" = "auto" ] || MODE="daily"
     [ "$THP" = "off" ] || THP="on"
     PKG=${PKG:-com.activision.callofduty.shooter}
     case "$PKG" in ""|*[!A-Za-z0-9._]*) PKG="com.activision.callofduty.shooter" ;; esac
@@ -85,6 +96,68 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
         ''|*[!0-9\ ]*) CDT="" ;;
         *) set -- $CDT; [ $# -eq 7 ] || CDT="" ;;
     esac
+    return 0
+}
+
+# ── v1.4.9: status parsen ohne forks (while-read direkt aus der Node) ────────
+_parse_status() {
+    _STV=""; _SSTATE=""; _STEMP=""; _STHROT=""; _SPMAX=""; _SAGE=""; _SVSRC=""; _SVVAL=""
+    _SHASHV=""; _SHASHS=""; _SBW1=""; _SBW2=""; _SHIST=""
+    _sl=""; _kk=""; _vv=""
+    [ -r "$GOV/status" ] || return 0
+    while IFS= read -r _sl; do
+        _kk=${_sl%%=*}
+        case "$_sl" in *=*) _vv=${_sl#*=} ;; *) _vv="" ;; esac
+        case "$_kk" in
+            version) _STV=$_vv ;;
+            state) _SSTATE=$_vv ;;
+            temp) _STEMP=$_vv ;;
+            throttle_events) _STHROT=$_vv ;;
+            policy_max) _SPMAX=$_vv ;;
+            state_age_ms) _SAGE=$_vv ;;
+            temp_src) _SVSRC=$_vv ;;
+            temp_valid) _SVVAL=$_vv ;;
+            hash_verified) _SHASHV=$_vv ;;
+            hash_state) _SHASHS=$_vv ;;
+            bw_floor_gpubw) _SBW1=$_vv ;;
+            bw_floor_llcc) _SBW2=$_vv ;;
+            hist) _SHIST=$_vv ;;
+        esac
+    done < "$GOV/status"
+    return 0
+}
+
+# ── v1.4.9: settings.conf nur neu laden, wenn stat-Signatur aendert ──────────
+_cfg_maybe_load() {
+    local sig
+    sig=$(stat -c '%s %Y' "$CONFIG" 2>/dev/null) || sig="x"
+    [ "$sig" = "$_CFG_SIG" ] && return 0
+    _CFG_SIG="$sig"
+    cfg_load
+}
+
+# ── v1.4.9: auto-erkennung (pidof + cgroup top-app, zero forks im cgroup-lesen)
+_auto_eval() {
+    local pid pidset topapp=0 _l1 _l2 _l3 _l4 _l5 _l6 _l7 _l8 _l9 _l10 _l11 _l12 _l13 _cgv
+    pidset=$(pidof "$PKG" 2>/dev/null) || pidset=""
+    pid=${pidset%%[ ]*}
+    _AUTO_PID="${pid:-0}"
+    if [ -z "$pid" ]; then
+        _AUTO_HIT=0
+        return 0
+    fi
+    _l1=""; _l2=""; _l3=""; _l4=""; _l5=""; _l6=""; _l7=""; _l8=""; _l9=""; _l10=""; _l11=""; _l12=""; _l13=""
+    { read _l1; read _l2; read _l3; read _l4; read _l5; read _l6; read _l7; read _l8; read _l9; read _l10; read _l11; read _l12; read _l13; } < "/proc/$pid/cgroup" 2>/dev/null
+    _cgv="$_l1 $_l2 $_l3 $_l4 $_l5 $_l6 $_l7 $_l8 $_l9 $_l10 $_l11 $_l12 $_l13"
+    case "$_cgv" in
+        *top-app*) topapp=1 ;;
+    esac
+    if [ "$topapp" = "1" ]; then
+        _AUTO_HIT=$((_AUTO_HIT + 1))
+        _AUTO_LAST=$(date +%s)
+    else
+        _AUTO_HIT=0
+    fi
     return 0
 }
 
@@ -152,6 +225,7 @@ _startup() {
     echo $$ > "$PIDF"
     rm -f "$MODDIR"/run/*.tmp 2>/dev/null
     cfg_load; _cache_thermal_zones; _init_freq_tables
+    _MODVER=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null)
     # Caps gegen die frisch gelesene OPP-Tabelle normalisieren — cfg_load lief
     # vor _init_freq_tables, dort war GOLD_FREQS noch leer (F17)
     CAP_G=$(_norm_cap "$CAP_G_RAW"); CAP_D=$(_norm_cap "$CAP_D_RAW")
@@ -162,13 +236,13 @@ _startup() {
     # Reboot/Modul-Neustart sonst verloren (2× passiert, F16)
     _apply_cd_thresholds
     _fix_usb_autosuspend
-    log "k6a-ctl v1.4.6 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0})"
+    log "k6a-ctl v1.4.9 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0})"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
         log "k6a_gov ${gv:-unbekannt} legacy=$(gov_read "legacy" 2>/dev/null | tr -d ' \n\r\t')"
         case "$gv" in
-            1.5.*|1.6.*) ;;
+            1.[5-9].*) ;;
             "") warn "k6a_gov status ohne version — Build 341 (1.5.0) erwartet" ;;
             *) warn "k6a_gov $gv — ab Build 341 (1.5.0): CONFIG_K6A_GOV=m als Modul plus hash_state" ;;
         esac
@@ -340,7 +414,7 @@ _apply_caps_gaming() {
 }
 
 _enter_daily() {
-    STATE="DAILY"; _GAMING_APPLIED=0; IDLE=0
+    STATE="DAILY"; _GAMING_APPLIED=0; IDLE=0; _FORCE_DATA=1
     _set_game_pid ""
     _apply_gold_cap "$CAP_D"
     _apply_silver_cap 0
@@ -356,7 +430,7 @@ _enter_daily() {
 }
 
 _enter_gaming() {
-    STATE="GAMING"; IDLE=0; _GAMING_APPLIED=0
+    STATE="GAMING"; IDLE=0; _GAMING_APPLIED=0; _FORCE_DATA=1
     _apply_caps_gaming
     if [ "$DELEGATED" = "1" ] && gov_sysfs_exists; then
         _apply_cd_thresholds
@@ -371,66 +445,43 @@ _enter_gaming() {
     fi
 }
 
-# ── write data for webui ────────────────────────────────────────────────────
+# ── write data for webui (v1.4.9: zero-fork-node-reads, Takt vom Aufrufer) ──
 _write_data() {
-    local t=$1 cs cg gm
-    cs=$(( $(r "$P0/scaling_cur_freq") / 1000 ))
-    cg=$(( $(r "$P6/scaling_cur_freq") / 1000 ))
-    gm=$(( $(r "$GPU/devfreq/cur_freq") / 1000000 ))
-    local bpc btp btpc
-    bpc=$(r /sys/class/power_supply/battery/capacity)
-    btp=$(r /sys/class/power_supply/battery/temp)
-    btpc="$(( btp / 10 )).$(( btp % 10 ))"
+    local t=$1 _now cs cg gm gn bpc btp btpc gv gs gt gte gpf ghv ghs gpc gbw gbl ghe gpm gas gts gtv gbg gbt gpid
+    _now=$(date +%s)
 
-    # Gov-Status: alles aus /sys/kernel/k6a_gov/status parsen
-    local gv="" gs="" gt="" gte="" gpf="" ghv="" ghs="" gpc="" gbw="" gbl="" ghe="" gbt=""
-    local gpm="" gas="" gts="" gtv="" gbg="" gpid=""
+    gn=""; read -r gn < "$P0/scaling_cur_freq" 2>/dev/null || gn=0; cs=$(( ${gn:-0} / 1000 ))
+    gn=""; read -r gn < "$P6/scaling_cur_freq" 2>/dev/null || gn=0; cg=$(( ${gn:-0} / 1000 ))
+    gn=""; read -r gn < "$GPU/devfreq/cur_freq" 2>/dev/null || gn=0; gm=$(( ${gn:-0} / 1000000 ))
+    gn=""; read -r bpc < /sys/class/power_supply/battery/capacity 2>/dev/null
+    gn=""; read -r btp < /sys/class/power_supply/battery/temp 2>/dev/null
+    btpc="$(( ${btp:-0} / 10 )).$(( ${btp:-0} % 10 ))"
+
+    gv=""; gs=""; gt=""; gte=""; gpf=""; ghv=""; ghs=""; gpc=""
+    gbw=""; gbl=""; ghe=""; gpm=""; gas=""; gts=""; gtv=""; gbg=""
+    gbt=""; gpid=""
     if [ "$DELEGATED" = "1" ] && [ -d "$GOV" ]; then
-        local _st
-        _st=$(cat "$GOV/status" 2>/dev/null)
-        gbt=$(gov_read "battery_guard_temp" 2>/dev/null | tr -d ' \n\r\t')
-        gv=$(echo "$_st" | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
-        gs=$(echo "$_st" | grep -oE "state=[a-z0-9_]+" | head -1 | cut -d= -f2)
-        gt=$(echo "$_st" | grep -oE "temp=[0-9]+" | head -1 | cut -d= -f2)
-        gte=$(echo "$_st" | grep -oE "throttle_events=[0-9]+" | head -1 | cut -d= -f2)
-        gpf=$(gov_read "profile" 2>/dev/null | tr -d '\n')
-        ghv=$(echo "$_st" | grep -oE "hash_verified=[01]" | head -1 | cut -d= -f2)
-        ghs=$(echo "$_st" | grep -oE "hash_state=[0-3]" | head -1 | cut -d= -f2)
-        gpc=$(gov_read "gpu_caps" 2>/dev/null | tr -d '\n')
-        gbw=$(echo "$_st" | grep -oE "bw_floor_gpubw=[0-9 ]+" | head -1 | sed 's/bw_floor_gpubw=/gpubw /')
-        gbl=$(echo "$_st" | grep -oE "bw_floor_llcc=[0-9 ]+" | head -1 | sed 's/bw_floor_llcc=/llcc /')
-        ghe=$(echo "$_st" | sed -n 's/^hist=//p')
-        gpm=$(echo "$_st" | grep -oE "policy_max=[0-9]+" | head -1 | cut -d= -f2)
-        gas=$(echo "$_st" | grep -oE "state_age_ms=[0-9]+" | head -1 | cut -d= -f2)
-        gts=$(echo "$_st" | grep -oE "temp_src=[0-9]+" | head -1 | cut -d= -f2)
-        gtv=$(echo "$_st" | grep -oE "temp_valid=[01]" | head -1 | cut -d= -f2)
-        gbg=$(gov_read "battery_guard" 2>/dev/null | tr -d ' \n\r\t')
-        gpid=$(gov_read "game_pid" 2>/dev/null | tr -d ' \n\r\t')
-        # Hist-Ring (v1.4.4): Kernel-State-Wechsel selbst erkennen —
-        # Kernel liefert nur die letzte Transition (hist=…), wir halten 15.
-        local _hf="$MODDIR/run/webhist.txt" _lsf="$MODDIR/run/webhist.last"
-        local _prev
-        _prev=$(r "$_lsf" 2>/dev/null)
-        if [ -n "$gs" ]; then
-            if [ -n "$_prev" ] && [ "$gs" != "$_prev" ]; then
-                printf '%s:%s:%s>%s\n' "$(date +%s)" "$t" "$_prev" "$gs" >> "$_hf" 2>/dev/null
-            fi
-            if [ ! -s "$_hf" ] && [ -n "$ghe" ]; then
-                printf '%s\n' "$ghe" > "$_hf" 2>/dev/null
-                printf '%s\n' "$gs" > "$_lsf" 2>/dev/null
-            fi
-            printf '%s\n' "$gs" > "$_lsf" 2>/dev/null
-            # auf 15 Eintraege kappen
-            local _n _keep
-            _n=$(wc -l < "$_hf" 2>/dev/null) || _n=0
-            if [ "$_n" -gt 15 ] 2>/dev/null; then
-                _keep=$(tail -n 15 "$_hf" 2>/dev/null)
-                [ -n "$_keep" ] && printf '%s\n' "$_keep" > "$_hf" 2>/dev/null
-            fi
+        gv=$_STV; gs=$_SSTATE; gt=$_STEMP; gte=$_STHROT
+        ghv=$_SHASHV; ghs=$_SHASHS
+        gpm=$_SPMAX; gas=$_SAGE; gts=$_SVSRC; gtv=$_SVVAL
+        case "$_SBW1" in "") gbw="" ;; *) gbw="gpubw $_SBW1" ;; esac
+        case "$_SBW2" in "") gbl="" ;; *) gbl="llcc $_SBW2" ;; esac
+        [ -r "$GOV/profile" ]            && { gn=""; read -r gpf  < "$GOV/profile" 2>/dev/null; }
+        [ -r "$GOV/gpu_caps" ]           && { gn=""; read -r gpc  < "$GOV/gpu_caps" 2>/dev/null; }
+        [ -r "$GOV/battery_guard_temp" ] && { gn=""; read -r gbt  < "$GOV/battery_guard_temp" 2>/dev/null; }
+        [ -r "$GOV/battery_guard" ]      && { gn=""; read -r gbg  < "$GOV/battery_guard" 2>/dev/null; }
+        [ -r "$GOV/game_pid" ]           && { gn=""; read -r gpid < "$GOV/game_pid" 2>/dev/null; }
+        if [ "$_HIST" = "" ] && [ -n "$_SHIST" ]; then
+            _HIST=$_SHIST
+        elif [ -n "$_HIST" ] && [ -n "$_SSTATE" ] && [ "$_SSTATE" != "$_lsf_state" ]; then
+            _HIST="$_HIST,$_now:$t:$_lsf_state>$_SSTATE"
         fi
-        if [ -s "$_hf" ]; then
-            ghe=$(cat "$_hf" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+        if [ -n "$_HIST" ]; then
+            _hn=1; _h2="$_HIST"
+            while [ "${_h2#*,}" != "$_h2" ]; do _h2=${_h2#*,}; _hn=$((_hn + 1)); done
+            while [ "$_hn" -gt 15 ]; do _HIST=${_HIST#*,}; _hn=$((_hn - 1)); done
         fi
+        _lsf_state=$_SSTATE
     fi
 
     cat > "${DATA}.tmp" << EOF
@@ -446,7 +497,7 @@ delegated=$DELEGATED
 tick=$TICK
 bat=${bpc}%
 bat_temp=${btpc}
-ts=$(date +%s)
+ts=$_now
 gov_version=$gv
 gov_state=$gs
 gov_temp=$gt
@@ -457,8 +508,7 @@ gov_hash_state=$ghs
 gov_gpu_caps=$gpc
 gov_bw_gpubw=$gbw
 gov_bw_llcc=$gbl
-gov_hist=$ghe
-modver=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null)
+modver=$_MODVER
 gov_batt_temp=$gbt
 gov_policy_max=$gpm
 gov_state_age=$gas
@@ -466,8 +516,71 @@ gov_temp_src=$gts
 gov_temp_valid=$gtv
 gov_batt_guard=$gbg
 gov_game_pid=$gpid
+gov_hist=${_HIST}
 EOF
     mv "${DATA}.tmp" "$DATA"
+}
+
+# ── P4 stale-watchdog: Supervisor-Thread-Wedge erkennen ─────────────────────
+# Liveness-Signal: state_age_ms waechst bei jedem Governor-Tick. 5 Ticks
+# hintereinander identisches (state_age_ms | temp)-Tupel + gleicher state
+# bei delegiert-laufendem Governor = Verdacht Thread haengt.
+# Reaction (Reviewer-Vorschlag): enable=0 -> einmal rmmod+insmod+Reapply ->
+# enable=1. Misserfolg: enable bleibt 0, Heartbeat-Log alle 60 Ticks.
+# NUR GAMING/delegiert — DAILY/OFF-Parken ist legitimes Einfrieren.
+_gov_stale_action() { # $1=grund
+    if [ "$_STE_TRIED" = "1" ]; then
+        err "GOV weiter wedged ($1) — enable bleibt 0 ${_STE_MSG:-}" && return 0
+    fi
+    _STE_TRIED=1
+    err "GOV WEDGED (5 Ticks ohne Fortschritt, $1) — Recovery: enable=0, rmmod+insmod"
+    gov_write "enable" 0
+    sleep 1
+    /system/bin/rmmod k6a_gov 2>/dev/null
+    sleep 1
+    if [ -f "$MODDIR/k6a_gov.ko" ]; then
+        /system/bin/insmod "$MODDIR/k6a_gov.ko" 2>/dev/null
+    fi
+    sleep 1
+    if gov_sysfs_exists; then
+        _apply_cd_thresholds
+        _apply_profile "$PROFILE"
+        _sync_batt_guard
+        gov_write "enable" 1
+        _STE_N=0; _STE_PREV=""
+        _STE_MSG="— Recovery gelungen (state_age beweist im naechsten Tick)"
+        log "GOV Recovery: k6a_gov.ko neu geladen, enable=1, Profile/Thresholds re-applied"
+    else
+        _STE_MSG="(Recovery fehlgeschlagen $(_STE_DATE)) — Governor aus, k6a-Caps laufen im cpufreq weiter"
+        err "GOV Recovery fehlgeschlagen — Governor aus gelassen (60-Tick-Heartbeat)"
+    fi
+}
+_STE_DATE() { date '+%H:%M:%S'; }
+_gov_stale_check() {
+    [ "$DELEGATED" = "1" ] || { _STE_N=0; return 0; }
+    [ "$STATE" = "GAMING" ] || { _STE_N=0; return 0; }
+    [ -d "$GOV" ] || { _STE_N=0; return 0; }
+    if [ -z "$_SSTATE" ]; then
+        _STE_N=$((_STE_N + 1))
+        if [ "$_STE_N" -ge 5 ] && [ $(( (_STE_N - 5) % 60 )) -eq 0 ] 2>/dev/null; then
+            _gov_stale_action "status leer bei vorhandenem gov-Dir"
+        fi
+        return 0
+    fi
+    local cur st
+    st="state=$_SSTATE"
+    case "$_STEMP" in "") _STE_N=0; _STE_PREV=""; return 0 ;; esac
+    case "$_SAGE"  in "") _STE_N=0; _STE_PREV=""; return 0 ;; esac
+    cur="$_STEMP|$_SAGE"
+    if [ "$cur" = "$_STE_PREV" ]; then
+        _STE_N=$((_STE_N + 1))
+    else
+        _STE_N=0; _STE_PREV="$cur"; _STE_TRIED=0
+    fi
+    if [ "$_STE_N" -ge 5 ] && [ $(( (_STE_N - 5) % 60 )) -eq 0 ] 2>/dev/null; then
+        _gov_stale_action "state Tuple eingefroren ($st, $cur)"
+    fi
+    return 0
 }
 
 # ── main ────────────────────────────────────────────────────────────────────
@@ -480,28 +593,45 @@ while true; do
     if [ -n "$OLD" ] && [ "$OLD" != "$$" ] && [ -d "/proc/$OLD" ]; then exit 0; fi
     echo $$ > "$PIDF"
 
-    cfg_load
+    _cfg_maybe_load
     _ensure_gov
     _sync_legacy
     TEMP_NOW=$(read_temp)
+    _parse_status
+    _gov_stale_check
 
     if [ "$MODE" = "gaming" ]; then
         [ "$STATE" != "GAMING" ] && _enter_gaming
+    elif [ "$MODE" = "auto" ]; then
+        _auto_eval
+        if [ "$STATE" = "GAMING" ]; then
+            _nowa=$(date +%s)
+            [ $(( _nowa - _AUTO_LAST )) -gt 10 ] && _enter_daily
+        else
+            [ "$_AUTO_HIT" -ge 2 ] && _enter_gaming
+        fi
+    else
+        [ "$STATE" != "DAILY" ] && _enter_daily
+    fi
+
+    if [ "$STATE" = "GAMING" ]; then
         _apply_caps_gaming
         [ "$_GAMING_APPLIED" = "0" ] && { _apply_gaming_userspace; _tune_game_threads; _GAMING_APPLIED=1; }
         [ $(( TICK % 5 )) -eq 0 ] && _apply_gaming_userspace
         [ $(( TICK % 60 )) -eq 0 ] && _tune_game_threads
-
-        # Auto badazz_safe switch
         [ "$DELEGATED" = "1" ] && [ -n "$TEMP_NOW" ] && _auto_badazz_switch "$TEMP_NOW"
-
+        [ "$MODE" = "auto" ] && _set_game_pid "${_AUTO_PID:-0}"
         SLEEP=1
     else
-        [ "$STATE" != "DAILY" ] && _enter_daily
         SLEEP=5
     fi
 
-    _write_data "$TEMP_NOW"
+    # data.txt: 2s-Takt im Gaming (TICK%2), sonst jeder Tick; force beim Wechsel
+    _okdata=0
+    [ "$STATE" = "GAMING" ] && [ $(( TICK % 2 )) -ne 0 ] || _okdata=1
+    [ "$_FORCE_DATA" = "1" ] && { _okdata=1; _FORCE_DATA=0; }
+    [ "$_okdata" = "1" ] && _write_data "$TEMP_NOW"
+
     # webui-watchdog (v1.4.5): alle 30 ticks — wrapper tot? → respawn
     [ $(( TICK % 30 )) -eq 0 ] && {
         _WP=$(cat "$MODDIR/run/webui.pid" 2>/dev/null)

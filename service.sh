@@ -1,5 +1,6 @@
 #!/system/bin/sh
 # k6a-ctl service.sh — boot setup + watchdogs (controller + webui)
+# v1.4.9: dynamischer k6a_gov-versionsgate, webui-token, P4-stale-watchdog
 MODDIR=${0%/*}
 LOG=$MODDIR/config/service.log
 
@@ -14,13 +15,26 @@ log() { _logrot; printf '[%s] [SVC] %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOG" 2
 
 mkdir -p "$MODDIR/run" "$MODDIR/config" "$MODDIR/webroot" 2>/dev/null
 chmod 755 "$MODDIR/bin/k6a-controller" "$MODDIR/bin/webui-server.sh" "$MODDIR/bin/webui-handler.sh" 2>/dev/null
-# USB dwc3 autosuspend - FIXED Badazz Build 68 (08.09.): autosuspend now safe, keep auto
+
+# ── webui token (root-only, für state-changing routes) ──────────────────────
+TOKENF=$MODDIR/config/webui.token
+if [ ! -s "$TOKENF" ]; then
+    tr -dc 'a-f0-9' </dev/urandom 2>/dev/null | head -c 32 > "$TOKENF" 2>/dev/null
+    [ -s "$TOKENF" ] && log "webui-token erzeugt"
+fi
+chmod 600 "$TOKENF" 2>/dev/null
+# token in webroot/app.js einbacken (falls abweichend)
+_TOK=$(tr -d '\r\n \t' < "$TOKENF" 2>/dev/null)
+if [ -n "$_TOK" ] && [ -f "$MODDIR/webroot/app.js" ] && ! grep -q "^const KTOKEN='$_TOK'" "$MODDIR/webroot/app.js" 2>/dev/null; then
+    sed -i "s/^const KTOKEN='.*'/const KTOKEN='$_TOK'/" "$MODDIR/webroot/app.js" 2>/dev/null \
+        && log "webroot/app.js token aktualisiert"
+fi
 
 # ── k6a_gov.ko laden (CONFIG_K6A_GOV=m ab Badazz Build 341) ──────────────────
 GOV=/sys/kernel/k6a_gov
-GOV_KO_VER=1.6.1
+GOV_KO_VER=1.7.0
 
-kver_ok() { case "${1:-}" in 1.5.*|1.6.*) return 0 ;; *) return 1 ;; esac }
+kver_ok() { case "${1:-}" in 1.[5-9].*) return 0 ;; *) return 1 ;; esac }
 
 _load_gov() {
     if [ -f "$GOV/status" ]; then
@@ -35,7 +49,7 @@ _load_gov() {
             if command -v strings >/dev/null 2>&1; then
                 kv=$(strings "$cand" 2>/dev/null | grep -E '^version=[0-9]+\.[0-9]+\.[0-9]+$' | head -1 | cut -d= -f2)
                 if [ -n "$kv" ] && ! kver_ok "$kv"; then
-                    log "WARN $cand version=$kv, erwartet ${GOV_KO_VER} (1.5.x|1.6.x) — überspringe"
+                    log "WARN $cand version=$kv, erwartet 1.5.x–1.9.x (dynamisch) — überspringe"
                     continue
                 fi
             fi
@@ -59,7 +73,7 @@ _load_gov() {
     sleep 1
     gv=$(grep -oE 'version=[^ ]*' "$GOV/status" 2>/dev/null | head -1 | cut -d= -f2)
     if ! kver_ok "$gv"; then
-        log "WARN k6a_gov runtime version=${gv:-?}, erwartet 1.5.x — rmmod"
+        log "WARN k6a_gov runtime version=${gv:-?}, erwartet 1.5.x–1.9.x — rmmod"
         /system/bin/rmmod k6a_gov 2>/dev/null
         return 1
     fi
@@ -102,7 +116,7 @@ CTRL="$MODDIR/bin/k6a-controller"
 _backoff=3; _crashes=0; _window=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)
 
 while true; do
-    nice -n -5 sh "$CTRL" "$MODDIR"
+    nice -n 0 sh "$CTRL" "$MODDIR"
     RC=$?
     [ -f "$MODDIR/run/stop" ] && { rm -f "$MODDIR/run/stop"; log "stop-file — ende"; break; }
     if [ "$RC" = "0" ]; then

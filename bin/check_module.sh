@@ -109,7 +109,7 @@ if [ -f "$CONF" ]; then
     fi
 
     m=$(grep "^mode=" "$CONF" | cut -d= -f2 | tr -d ' ')
-    case "$m" in gaming|daily) _pass "mode=$m" ;; *) _fail "mode ungültig: [$m]" ;; esac
+    case "$m" in gaming|daily|auto) _pass "mode=$m" ;; *) _fail "mode ungültig: [$m]" ;; esac
 fi
 
 # ── 5b/6 Version-Lock: service.sh (insmod) ↔ controller (wartet auf) ─────────
@@ -123,6 +123,8 @@ fi
 GMM=${GKV%.*}
 if [ -n "$GMM" ] && grep -q "${GMM}\.\*" "$MOD/bin/k6a-controller" 2>/dev/null; then
     _pass "controller wartet auf k6a_gov ${GMM}.*"
+elif grep -qF '1.[5-9].*' "$MOD/bin/k6a-controller" 2>/dev/null; then
+    _pass "controller dynamisch (1.[5-9].*)"
 else
     _fail "Version-Lock inkonsistent: controller wartet nicht auf ${GMM:-?}.*"
 fi
