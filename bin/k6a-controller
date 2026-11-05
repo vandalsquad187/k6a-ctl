@@ -1,6 +1,10 @@
 #!/system/bin/sh
-# k6a-ctl controller v1.4.9 — delegated thermal management
+# k6a-ctl controller v1.4.10 — delegated thermal management
 # states: DAILY | GAMING
+# v1.4.10: daily→gaming-Neustart schrieb Gold-Cap nicht neu: _THP_APPLIED
+#   hielt die Gaming-Tuple und ließ _apply_caps_gaming stumm skippen —
+#   Match 2 lief komplett auf 1555200 (Daily-Cap), Fund 2026-11-05.
+#   Fix: Guard-Invalidierung in _enter_daily + _enter_gaming (belt+braces).
 # v1.4.9: (a) mode=auto — pidof + /proc/<pid>/cgroup top-app + Hysterese
 #   (2 Bestaetigungs-Ticks rein, 10s ohne top-app raus -> DAILY); mode=gaming
 #   bleibt als Dauer-Test-Art (enable=1). (b) Status-Parsen ohne forks
@@ -236,7 +240,7 @@ _startup() {
     # Reboot/Modul-Neustart sonst verloren (2× passiert, F16)
     _apply_cd_thresholds
     _fix_usb_autosuspend
-    log "k6a-ctl v1.4.9 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0})"
+    log "k6a-ctl v1.4.10 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0})"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -415,6 +419,7 @@ _apply_caps_gaming() {
 
 _enter_daily() {
     STATE="DAILY"; _GAMING_APPLIED=0; IDLE=0; _FORCE_DATA=1
+    _THP_APPLIED=""   # v1.4.10: nächstes _enter_gaming MUSS Caps frisch schreiben
     _set_game_pid ""
     _apply_gold_cap "$CAP_D"
     _apply_silver_cap 0
@@ -431,6 +436,7 @@ _enter_daily() {
 
 _enter_gaming() {
     STATE="GAMING"; IDLE=0; _GAMING_APPLIED=0; _FORCE_DATA=1
+    _THP_APPLIED=""   # v1.4.10: belt+braces — Force-Apply bei jedem Entry
     _apply_caps_gaming
     if [ "$DELEGATED" = "1" ] && gov_sysfs_exists; then
         _apply_cd_thresholds

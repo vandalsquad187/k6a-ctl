@@ -331,6 +331,29 @@ Reviewer-Runde 2026-11 (5 Befunde, alle umgesetzt, am Gerät live verifiziert):
   battery_guard_temp `47`/guard `off`
 - on-device `sh -n` über controller/handler/service grün
 
+## 2026-11-05 — v1.4.10: Gold-Cap-Skip nach daily→gaming (Match-2-Befund)
+
+- **Befund** (Match 2, 22:21–22:45): Controller-Enter 22:24:35 loggte
+  `profile → badazz_safe` + `-> GAMING (…gold_cap=1708800…)`, aber **keine**
+  `gold_cap →…`/`thermal_protect=on`-Zeile — Kernel lief mit
+  `policy_max=1555200` (Daily-Cap) kalt durchs ganze Match, während Match 1
+  sauber 1708800 hielt.
+- **Root Cause**: `_apply_caps_gaming`-Guard verglich den Prozess-State
+  `_THP_APPLIED` gegen den Config-Tuple (`on|1708800|0|0`). Nach `_enter_daily`
+  blieb dieTuple stehen; das nächste `_enter_gaming` (2. Match im selben
+  Controller-Prozess) matchte exakt → stummer `return 0` → kein
+  `P6/scaling_max_freq`-Write. Im Kernel (delegated, `legacy_mode=1`) setzt
+  `enforce_max_freq` im plain-GAMING-State `cap_now=0` und schreibt nichts —
+  Caps im delegated-Modus macht **nur** der Controller. Also blieb 1555200.
+- **Fix**: Guard-Invalidierung (`_THP_APPLIED=""`) in `_enter_daily` &&
+  belt+braces in `_enter_gaming`. Der Guard bleibt for die Live-Reaktion auf
+  Config-Änderungen im Tick-Loop (Zeile 620) — dort muss er matchen/konvergieren.
+  Innere `_apply_gold_cap/_apply_silver_cap/_apply_gpu_cap`-Wert-Guards machen
+  das Entry idempotent (Silver/GPU: 0==0 → skip wie bisher, Gold: 1555200≠1708800 → write+log).
+- ** Erläuterung als Theorie-Mitnahme**: das Crash-Fenster 20:34–20:40 (Kernel
+  gaming auf 1555200) zeigt exakt dieselbe Signatur — Kernel-/Boot-Default-Cap
+  im State gaming, kein Raise durch irgendeine Schicht.
+
 ## 2026-10-18 — v1.4.1: GAMING-Schwellen 96/99/102/93 (BadazzKernel build352)
 
 Messbasis: BadazzKernel-runde r46–r54 (build351, gleiche Karte, NoFan,
