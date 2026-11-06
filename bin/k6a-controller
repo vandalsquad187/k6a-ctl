@@ -1,6 +1,13 @@
 #!/system/bin/sh
-# k6a-ctl controller v1.4.10 — delegated thermal management
+# k6a-ctl controller v1.5.0 — delegated thermal management
 # states: DAILY | GAMING
+# v1.5.0: turbo — Thermal-Brake-Controller (settings: turbo_stop_daemons,
+#   turbo_spoof_temp). GAMING-Entry pausiert Userspace-OEM-Brake
+#   (vendor.thermal-engine + mi_thermald via ctl.stop) und/oder mountet
+#   30°-Fake-Temp über die SoC-Zonen (Bind-Mount auf zone26/26/temp-Files —
+#   NUR Userspace-Reader blind; k6a_gov liest kernel-seitig REAL, Akku/BCL
+#   unangetastet). DAILY-Entry/Watchdog-Restart stellt alles wieder her
+#   (no mode-writes, keine Zone-Deaktivierung, auto-umount-Recovery).
 # v1.4.10: daily→gaming-Neustart schrieb Gold-Cap nicht neu: _THP_APPLIED
 #   hielt die Gaming-Tuple und ließ _apply_caps_gaming stumm skippen —
 #   Match 2 lief komplett auf 1555200 (Daily-Cap), Fund 2026-11-05.
@@ -51,6 +58,7 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
     MODE=""; THP=""; PKG=""; DELEGATED=""; PROFILE=""
     AUTO_BT=""; AUTO_HYST=""; BATT_T=""; BATT_GUARD=""; CFG_DEBUG=""
     CAP_G=""; CAP_D=""; CDT=""
+    TURBO_STOP=""; TURBO_SPOOF=""
     local _line _kk _vv
     if [ -f "$CONFIG" ]; then
         while IFS= read -r _line || [ -n "$_line" ]; do
@@ -71,6 +79,8 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
                 silver_cap_gaming) SILCAP_G_RAW=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
                 gpu_cap_gaming) GPUCAP_G_RAW=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
                 cd_thresholds) CDT=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
+                turbo_stop_daemons) TURBO_STOP=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+                turbo_spoof_temp) TURBO_SPOOF=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
                 debug) CFG_DEBUG=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
             esac
         done < "$CONFIG" 2>/dev/null
@@ -86,6 +96,8 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
     case "$BATT_T" in ''|*[!0-9]*) BATT_T=45 ;; *) [ "$BATT_T" -lt 35 ] 2>/dev/null && BATT_T=35; [ "$BATT_T" -gt 60 ] 2>/dev/null && BATT_T=60 ;; esac
     [ "$BATT_GUARD" = "off" ] || BATT_GUARD="on"
     [ "$CFG_DEBUG" = "1" ] || CFG_DEBUG=0
+    [ "$TURBO_STOP" = "1" ] || TURBO_STOP=0
+    [ "$TURBO_SPOOF" = "1" ] || TURBO_SPOOF=0
     # Rohwert sichern — die Normalisierung gegen GOLD_FREQS läuft erst nach
     # _init_freq_tables im _startup, hier ist die Tabelle noch leer (F17)
     case "$CAP_G" in ''|*[!0-9]*) CAP_G=0 ;; esac
@@ -240,7 +252,8 @@ _startup() {
     # Reboot/Modul-Neustart sonst verloren (2× passiert, F16)
     _apply_cd_thresholds
     _fix_usb_autosuspend
-    log "k6a-ctl v1.4.10 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0})"
+    _turbo_recover
+    log "k6a-ctl v1.5.0 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -398,6 +411,71 @@ _apply_cd_thresholds() {
     log "cd_thresholds ← $CDT"
 }
 
+# ── v1.5.0 turbo: Thermal-Brake-Controller ───────────────────────────────────
+# Ziel: die Userspace-OEM-Brake (vendor.thermal-engine + mi_thermald) während
+# GAMING aus dem Weg räumen — entweder durch Pause (ctl.stop) oder, optional,
+# indem die SoC-Zonen-Temp-Files (Userspace-Reader!) auf 30 °C gefaked werden.
+# INVARIANTEM (bewusst, alles was Licking-14.1 fälschlich mitnimmt entfällt):
+#   * KEINE zone-mode-Writes (mode=disabled würde die Kernel-Sensorkette
+#     einfrieren — k6a_gov liest kernel-seitig REAL und muss REAL sehen)
+#   * NUR CPU/SoC-Zonen (26/18, unser temp_src-Set); Akku/BCL/Limit-Nodes
+#     unangetastet; GPU/ kgsl unberührt
+#   * Bind-Mounts + Daemon-Restore sind wiederholbar (recovery) & reversibel
+ _TURBO_ZONES="/sys/devices/virtual/thermal/thermal_zone26/temp /sys/devices/virtual/thermal/thermal_zone18/temp"
+_TURBO_ACTIVE=0
+# absolute Pfade — Mount-Binaries nicht von $PATH abhängig machen (su/ksu-Shells
+# haben je nach Context verschiedene PATHs)
+_MOUNT=/system/bin/mount
+_UMOUNT=/system/bin/umount
+_turbo_recover() { # Controller-Cold-Start: Rest-Mounts räumen, Daemons sicherstellen
+    local z m up=0
+    for z in $_TURBO_ZONES; do
+        [ -f "$z" ] || continue
+        m=$($_MOUNT 2>/dev/null | grep -F -- " on $z type " 2>/dev/null)
+        [ -n "$m" ] && { $_UMOUNT "$z" 2>/dev/null; up=1; }
+    done
+    [ "$up" = "1" ] && log "turbo-recover: stale temp-spoof mounts entfernt"
+    setprop ctl.start vendor.thermal-engine 2>/dev/null
+    setprop ctl.start mi_thermald 2>/dev/null
+    rm -f "$MODDIR/run/faketemp" 2>/dev/null
+    _TURBO_ACTIVE=0
+}
+_turbo_on() {
+    [ "$TURBO_STOP" = "1" ] || [ "$TURBO_SPOOF" = "1" ] || return 0
+    if [ "$TURBO_STOP" = "1" ] && [ "$_TURBO_ACTIVE" != "1" ]; then
+        setprop ctl.stop vendor.thermal-engine 2>/dev/null
+        setprop ctl.stop mi_thermald 2>/dev/null
+        log "turbo: thermal-daemons pausiert (engine+mi_thermald)"
+    fi
+    # Presence-Check per MOUNTPOINT (Source-Spalte zeigt für file-bind-mounts
+    # /dev/block/dm-XX, NICHT den Dateinamen — "grep faketemp" findet nix)
+    if [ "$TURBO_SPOOF" = "1" ] && ! $_MOUNT 2>/dev/null | grep -qF -- " on /sys/devices/virtual/thermal/thermal_zone26/temp type "; then
+        printf '30000\n' > "$MODDIR/run/faketemp" 2>/dev/null
+        local z ok=""
+        for z in $_TURBO_ZONES; do
+            [ -f "$z" ] || continue
+            if $_MOUNT --bind "$MODDIR/run/faketemp" "$z" 2>/dev/null; then
+                ok="$ok ${z##*/thermal_zone}"
+            else
+                log "turbo: mount fail $z"
+            fi
+        done
+        log "turbo: temp-spoof 30° aktiv (zone$ok)"
+    fi
+    _TURBO_ACTIVE=1
+}
+_turbo_off() {
+    [ "$_TURBO_ACTIVE" = "1" ] || return 0
+    local z
+    for z in $_TURBO_ZONES; do
+        $_MOUNT 2>/dev/null | grep -F -- " on $z type " >/dev/null 2>&1 && $_UMOUNT "$z" 2>/dev/null
+    done
+    setprop ctl.start vendor.thermal-engine 2>/dev/null
+    setprop ctl.start mi_thermald 2>/dev/null
+    log "turbo: oem-brake wiederhergestellt (mounts aus, daemons on)"
+    _TURBO_ACTIVE=0
+}
+
 # ── state transitions ───────────────────────────────────────────────────────
 # thermal_protect (v1.4.3, jetzt wirksam): on = Deckel genau per settings.conf;
 # off = Gaming-Deckel pausieren (gold/silver/gpu → Boot-Max). battery_guard,
@@ -432,6 +510,7 @@ _enter_daily() {
     else
         log "-> DAILY (legacy, gold_cap=${CAP_D:-off}, silver_cap=default, gpu_cap=default)"
     fi
+    _turbo_off
 }
 
 _enter_gaming() {
@@ -449,6 +528,7 @@ _enter_gaming() {
         gpu_limits "$GPU_MAX"
         log "-> GAMING (legacy, gold_cap=${CAP_G:-off}, silver_cap=default, gpu_cap=default)"
     fi
+    _turbo_on
 }
 
 # ── write data for webui (v1.4.9: zero-fork-node-reads, Takt vom Aufrufer) ──

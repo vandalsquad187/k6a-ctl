@@ -296,6 +296,72 @@ Entwickelt und gefestigt in einer langen gemeinsamen Debug-Session: von
 „ein doppeltes `const` tötete die komplette WebUI" bis zu einem validierten
 In-Kernel-Governor-Stack mit 290+ nachgewiesenen Cooldown-Eingriffen.
 
+## 2026-11-07 — v1.5.0: „turbo“ — Thermal-Brake-Controller (OEM-Brake lockern)
+
+Anlass: ein Reviewer brachte ein Magisk-Modul („Licking-Thermal 14.1“) an, das
+alle Thermal-Userspace-Ketten nuklear ausschaltet: `ctl.stop` aller drei
+Daemons (vendor.thermal-engine, mi_thermald, thermal-HAL), `mode=disabled` +
+Fake-Temp-30°-Bind-Mounts über **alle** Zonen, leere Dateien über jede
+`*thermal*`/`*throttl*`-Datei in /system-/vendor, kgsl
+`force_clk_on/throttling=0`, Akku-Grenzen verbogen (temp_hot=57 °C,
+thermal_limit=0, bcl=0). Klarer Konsens: **nicht flashen** — `mode=disabled`
+friert die Kernel-Sensorkette ein, also genau die Datenquelle, an der
+k6a_gov hängt.
+
+v1.5.0 baut das allein sinnvolle Subset davon als optionale Toggles in den
+Controller (settings.conf, hot-reload):
+
+### Die zwei Arme (unabhängig kombinierbar, Default je 0)
+- **`turbo_stop_daemons=1`** — bei `_enter_gaming`:
+  `setprop ctl.stop vendor.thermal-engine` + `setprop ctl.stop mi_thermald`.
+  Userspace-OEM-Brake pausiert. Der thermal-HAL (`vendor.thermal-hal`) bleibt
+  absichtlich an (reine Lese-/Report-Instanz, throttelt nichts).
+- **`turbo_spoof_temp=1`** — Bind-Mount `$MODDIR/run/faketemp` (30000 =
+  30.0 °C) auf **nur die 2 SoC-Zonen** (`thermal_zone26/temp`,
+  `thermal_zone18/temp` — exakt die Zonen, aus denen der Stack seinen
+  Gaming-Temp-Eindruck bezieht).
+
+### Invarianten (was bewusst NICHT passiert)
+- **kein `mode=disabled`** — Zonen bleiben aktiv, Trip-Logik des Kernels
+  wirkt weiter real
+- **Akku/BCL unberührt** — temp_hot/thermal_limit/bcl, Akku-Temp-Nodes
+- **k6a_gov liest real** — Kernel liest Sensoren direkt, Bind-Mounts wirken
+  nur auf Userspace-Reader
+- kgsl/GPU-Frequenzpfade unangetastet (kein force_clk_on-Gehirnersatz)
+
+### Recovery (alles reversibel)
+- `_turbo_recover` bei JEDEM Controller-Cold-Start (Boot, Watchdog-Respawn):
+  stale Bind-Mounts umounten + `ctl.start` auf beiden Daemons (idempotent —
+  init ignoriert Start bereits laufender Services)
+- `_enter_daily` umountet und restauriert die Daemons (Guard `_TURBO_ACTIVE`)
+- absolute Binärpfade (`/system/bin/mount`, `/system/bin/umount`) — die
+  Mount-Aufrufe hängen nicht vom $PATH ab (su-Shells erben je nach Kontext
+  unterschiedliche PATHs; Befund „mount: not found“ in einer Termux-su-Shell)
+
+### Getestet am Gerät (2026-11-07)
+- Spoof-Arm einmalig manuell: Bind-Mount an → Zone-Temps `30000/30000`,
+  k6a_gov-Status zeitgleich unverändert `temp=69` (Kernel liest real);
+  `umount` → Temps wieder real, keine Leftovers, `run/faketemp` aufgeräumt
+- Mount-Verifikation per **Mountpoint** (` on <zone>/temp type `), nicht per
+  Dateinamen: /proc/mounts zeigt für File-Bind-Mounts als Source
+  `/dev/block/dm-XX` — `grep faketemp` findet nichts (Befund, gefixt)
+- Deployment verifiziert: Banner `v1.5.0 … turbo_stop=0 turbo_spoof=0`,
+  DAILY-Entry sauber, thermal-Daemons (1361/1541/2137) laufen
+
+### Messplan (A-Profil als Basis)
+Basis = A-Regime (thresholds 96/99/102/93, gpu_caps 585/430/305, hysteresis
+500/2000, battery_guard_temp 47 — wie R3-A), `turbo_*=0`:
+1. **A10** = `turbo_stop_daemons=1` (1 Match) → Daemon-Pause allein
+2. **A11** = beide Arme an (1 Match) → Daemon-Pause + Userspace-Temp blind
+Vergleichsanker: R3-A (Ø med180 73.9 fps; thermal-engine schrieb nie auf das
+Gold-Cluster) und R4-B (NoFan+B, 2/2-Matches, med180 76.2/77.1 fps). Weil
+die OEM-Brake bislang keinen messbaren FPS-Einfluss zeigte, ist der
+Erwartungswert der Arme klein — Sinn ist der saubere Ersatz für das
+Reviewer-Modul: gleiche Wirkung (OEM-Userpace-Brake aus), aber mit
+Kill-Switch (Settings auf 0), Recovery und ohne Zone-/Akku-Tricks des Moduls.
+
+## 2026-11-05 — v1.4.9: Token-Gate, Fork-Diet, mode=auto, P4-Watchdog (Review-Runde)
+
 ## 2026-11-05 — v1.4.9: Token-Gate, Fork-Diet, mode=auto, P4-Watchdog (Review-Runde)
 
 Reviewer-Runde 2026-11 (5 Befunde, alle umgesetzt, am Gerät live verifiziert):
