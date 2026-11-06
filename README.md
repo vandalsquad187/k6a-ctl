@@ -354,6 +354,36 @@ Reviewer-Runde 2026-11 (5 Befunde, alle umgesetzt, am Gerät live verifiziert):
   gaming auf 1555200) zeigt exakt dieselbe Signatur — Kernel-/Boot-Default-Cap
   im State gaming, kein Raise durch irgendeine Schicht.
 
+## 2026-11-06 — v1.4.10 am Gerät verifiziert: R4-B-Serie (NoFan, 2 Matches)
+
+Messkonfiguration (B-Profil / Reviewer-Deckel, Lüfter aus):
+`cd_thresholds=60 85 92 55 1555200 1200000 1000000`, `battery_guard_temp=45`,
+Gold-Caps 1708800 (gaming) / 1555200 (daily), `gpu_caps=565/430/355 MHz`.
+
+Kern-Semantik in beiden Runden identisch: Entry → ~1 min `policy=1708800`
+(gaming) → CD_L2 ab Window ≥ 60° → restliche Matchdauer `policy=1555200`,
+GPU ≤ 565 MHz, keine L3/L4-Eskalation, Exit sauber → DAILY (1555200).
+
+| Runde | Dauer | gaming/cd_l2-Residency | Policy | GPU-Histogramm (dedup/s) | ktemp max | Ende-Zonen | Akku |
+|---|---|---|---|---|---|---|---|
+| M1 20:21–20:38 | ~17 min | 104 s / 911 s | 1555200 ab +65 s | 529×355 · 260×565 · 158×430 · 1×800 | 81 | 69.0/66.7 | 96→77 % |
+| M2 21:07–21:28 | ~21 min | 99 s / 1153 s | 1555200 ab +99 s | 510×355 · 167×565 · 127×430 · 6×650 · 2×800 | 81 | 72.5/69.0 | 69→51 % |
+
+- **v1.4.10-2nd-Entry-Proof**: M2 war der zweite Entry im selben
+  Controller-Prozess. Entry 21:07:35 schrieb erwartungskonform
+  `gold_cap → 1708800` + `thermal_protect=on` + `cd_thresholds` +
+  `profile → badazz_safe` (service.log) — der stille Skip aus v1.4.9 ist
+  damit in Aktion gefehlt und nach dem Fix verifiziert behoben.
+- NoFan-FPS-Eindruck: M1 leichte Frame-Dips in der letzten Matchminute;
+  M2 (heißeres Ende, 72.5 °C Zone) subjektiv **ohne** End-Dips — das
+  Deckel-Regime hält die Gold-Last konstant warm-neutral.
+- IO-Protokoll (Nachtrag): der Sampler (`io_samp4.sh`) verschiebt die vorige
+  Out-Datei per **startup-`mv`** in `_DONE_`/`_PARTIAL_`/`_ARM_<epoch>`-Backups
+  — Match-Daten gehen dadurch **nicht verloren**; parallel laufende
+  Sampler-Instanzen inter-leaven Rows (Auswertung daher dedup pro Sekunde).
+  Respawn-Loop inkl. Rotation gehört zum `badazz_iowatch`-Modul
+  (`service.sh` + `.io_samp_env`/`.io_arm_flag`).
+
 ## 2026-10-18 — v1.4.1: GAMING-Schwellen 96/99/102/93 (BadazzKernel build352)
 
 Messbasis: BadazzKernel-runde r46–r54 (build351, gleiche Karte, NoFan,
