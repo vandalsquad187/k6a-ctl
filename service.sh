@@ -34,7 +34,7 @@ fi
 GOV=/sys/kernel/k6a_gov
 GOV_KO_VER=1.7.0
 
-kver_ok() { case "${1:-}" in 1.[5-9].*) return 0 ;; *) return 1 ;; esac }
+kver_ok() { case "${1:-}" in 1.[5-9].*|1.[1-9][0-9].*) return 0 ;; *) return 1 ;; esac }
 
 _load_gov() {
     if [ -f "$GOV/status" ]; then
@@ -49,7 +49,7 @@ _load_gov() {
             if command -v strings >/dev/null 2>&1; then
                 kv=$(strings "$cand" 2>/dev/null | grep -E '^version=[0-9]+\.[0-9]+\.[0-9]+$' | head -1 | cut -d= -f2)
                 if [ -n "$kv" ] && ! kver_ok "$kv"; then
-                    log "WARN $cand version=$kv, erwartet 1.5.x–1.9.x (dynamisch) — überspringe"
+                    log "WARN $cand version=$kv, erwartet 1.5.x–1.9.x / 1.10+ — überspringe"
                     continue
                 fi
             fi
@@ -73,7 +73,7 @@ _load_gov() {
     sleep 1
     gv=$(grep -oE 'version=[^ ]*' "$GOV/status" 2>/dev/null | head -1 | cut -d= -f2)
     if ! kver_ok "$gv"; then
-        log "WARN k6a_gov runtime version=${gv:-?}, erwartet 1.5.x–1.9.x — rmmod"
+        log "WARN k6a_gov runtime version=${gv:-?}, erwartet 1.5.x–1.9.x / 1.10+ — rmmod"
         /system/bin/rmmod k6a_gov 2>/dev/null
         return 1
     fi

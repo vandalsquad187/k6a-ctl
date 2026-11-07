@@ -296,6 +296,34 @@ Entwickelt und gefestigt in einer langen gemeinsamen Debug-Session: von
 „ein doppeltes `const` tötete die komplette WebUI" bis zu einem validierten
 In-Kernel-Governor-Stack mit 290+ nachgewiesenen Cooldown-Eingriffen.
 
+## 2026-11-07 — v1.5.1: WebUI-Härtung + gov-Versionen 1.10+ (Reviewer-Patch)
+
+Reviewer-Patch „token_log_lock“ vom Team (3 Hunks, alle übernommen):
+
+### Änderungen in v1.5.1
+- **setcfg-Lock** (bin/webui-handler.sh): `mkdir`-Spin um das
+  Read-Modify-Write auf settings.conf (40×50 ms, danach Stale-Break >
+  2 s). Reine Defensive — der nc-Server ist sequenziell (eine Connection
+  nach der anderen) — falls aber zwei Connections kollidieren, nimmt sich
+  kein Request mehr die Keys des anderen weg.
+- **Token nie im Log** (bin/webui-handler.sh): `_logq` schreibt per
+  `sed 's/\([?&]\)k=[0-9a-fA-F]*/\1k=***/'` → REQ-Log-Zeile zeigt `k=***`.
+  GET-Only-Handler-Architektur macht das wasserdicht (der Handler liest
+  nur die zuerst empfangene GET-Line `read -r REQ`, das Token kommt also nur
+  im Query-String vor; Token ist 32-hex via `tr -dc 'a-f0-9'` — die
+  Zeichenklasse greift).
+- **kver_ok erweitert** (service.sh): `1.[5-9].*` →
+  `1.[5-9].*|1.[1-9][0-9].*` — lädt k6a_gov auch, wenn der Kernel-Gov auf
+  1.10.x geht (beide Warn-Texte mit angepasst). 1.7.0 weiter ok; Versionen
+  < 1.5 bleiben abgelehnt.
+
+### Verifiziert
+- `/ping` + no-op-setcfg → REQ-Log zeigt `k=***`, Lock-Verzeichnis
+  nach dem Request geräumt, 6er-Request-Kette alle OK
+- kver_ok-Muster lokal geprüft (`1.7.0` ok, `1.10.0` ok, `1.4.9` reject)
+- kein Controller-Restart nötig — der Handler wird pro Connection frisch
+  geladen; die service.sh-Änderungen wirken beim nächsten Boot
+
 ## 2026-11-07 — v1.5.0: „turbo“ — Thermal-Brake-Controller (OEM-Brake lockern)
 
 Anlass: ein Reviewer brachte ein Magisk-Modul („Licking-Thermal 14.1“) an, das

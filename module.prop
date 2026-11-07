@@ -1,6 +1,6 @@
 id=k6a-ctl
 name=k6a-ctl
-version=1.5.0
-versionCode=160
+version=1.5.1
+versionCode=161
 author=BadaZz89
-description=Two-mode (daily/gaming) governor companion for BadazzKernel: gold-cluster cap, persistent (idempotent written) cd_thresholds 96/99/102/93, schedutil tuning, delegates to in-kernel k6a_gov. Single-source config, localhost WebUI. v1.5.0: turbo — Thermal-Brake-Controller (turbo_stop_daemons: vendor.thermal-engine+mi_thermald Pause im Gaming; turbo_spoof_temp: 30°-Fake-Temp Bind-Mount auf SoC-Zonen, k6a/kernel-Sensorkette bleibt real, Akku/BCL unangetastet) mit Recover beim Watchdog-Restart.
+description=Two-mode (daily/gaming) governor companion for BadazzKernel: gold-cluster cap, persistent (idempotent written) cd_thresholds 96/99/102/93, schedutil tuning, delegates to in-kernel k6a_gov. Single-source config, localhost WebUI. v1.5.0: turbo — Thermal-Brake-Controller (turbo_stop_daemons: vendor.thermal-engine+mi_thermald Pause im Gaming; turbo_spoof_temp: 30°-Fake-Temp Bind-Mount auf SoC-Zonen, k6a/kernel-Sensorkette bleibt real, Akku/BCL unangetastet) mit Recover beim Watchdog-Restart. v1.5.1: WebUI-Härtung (setcfg-RMW-Lock, Token aus REQ-Log redigiert), kver_ok akzeptiert k6a_gov 1.10+.

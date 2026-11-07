@@ -29,7 +29,7 @@ _auth_or_bad() { # k=<token> verpflichtend an jeder state-changing route
     exit 1
 }
 
-setcfg() {
+_setcfg_locked() {
     local k="$1" v="$2" tmp
     tmp=$(mktemp "${CONF}.tmp.XXXXXX" 2>/dev/null) || return 1
     if grep -q "^${k}=" "$CONF" 2>/dev/null; then
@@ -40,6 +40,21 @@ setcfg() {
         printf '%s=%s\n' "$k" "$v" >> "$tmp"
     fi
     mv -f "$tmp" "$CONF" 2>/dev/null || { cat "$tmp" > "$CONF" 2>/dev/null; rm -f "$tmp"; }
+}
+# Lock um den Read-Modify-Write: gleichzeitige Requests dürfen sich keine Keys wegnehmen
+setcfg() {
+    local lk="${CONF}.lock" i=0
+    while ! mkdir "$lk" 2>/dev/null; do
+        i=$((i+1))
+        if [ "$i" -gt 40 ]; then          # veralteter Lock (>2 s): brechen
+            rmdir "$lk" 2>/dev/null
+            mkdir "$lk" 2>/dev/null || return 1
+            break
+        fi
+        sleep 0.05
+    done
+    _setcfg_locked "$@"
+    rmdir "$lk" 2>/dev/null
 }
 bw_set() {
     local vals="$1" a b c d e f
@@ -57,7 +72,7 @@ bw_set() {
 }
 
 # REQ log: CRLF + injection strip (only state-changing, no /ping spam)
-_logq=$(printf '%s' "$REQ" | tr -d '\r\n' | cut -c1-120)
+_logq=$(printf '%s' "$REQ" | tr -d '\r\n' | sed 's/\([?&]\)k=[0-9a-fA-F]*/\1k=***/' | cut -c1-120)   # Token nie im Log
 _logf="${CONF%/*}/../config/service.log"
 case "$P" in
     /ping) ;;
