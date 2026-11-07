@@ -11,6 +11,30 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 > der Governor per `insmod` geladen und ist ohne Kernel-Flash nachrüstbar.
 > Ältere Kernel laufen, verlieren aber die Live-Cap-/BW-Statuswerte.
 
+## 2026-11-07 — v1.5.2: Fork-Diet im GAMING-Hot-Loop
+Ziel: Reviewer-Befund „Controller 18 % eines Kerns im Gaming" senken.
+Umgesetzt (ohne Semantik-Änderung):
+- **SLEEP=2** im GAMING statt 1 (DAILY bleibt 5 s): halbiert die Tick-Rate
+  im Gaming — der größte Hebel (~−50 % der Hot-Loop-Kosten); die
+  Entry/Exit-Hysterese (`_AUTO_HIT≥2`, 10-s-Exit) bleibt gültig, WebUI-Takt
+  im Gaming unverändert 2 s.
+- **read_temp** setzt `TEMP_NOW` direkt (global) statt `echo` aus
+  `$(cat ...)` — 2 Forks + 2 Subshells entfallen pro Tick.
+- **_ensure_gov**: scaling_governor-Vergleich via `read -r` statt
+  `$(cat ...)` — 2 Forks + 2 Subshells entfallen pro Tick.
+- **Single-Instance-Guard**: `OLD=$(cat $PIDF)` → `read -r OLD < $PIDF`
+  (Built-in, 0 Forks pro Tick).
+- **_AUTO_LAST/_nowa** (GAMING-Exit-Hysterese) von `date +%s`-Forks auf
+  einen `/proc/uptime`-Built-in-Read umgestellt (Uptime-Domain; 0 Forks
+  statt 2 Forks pro Tick im Gaming).
+Nicht geändert: Epoch-Format von `ts`/hist in data.txt, guard-Race-Fenster,
+Watchdog/Recovery-Logik, WebUI/Handler.
+
+Erste Messung (DAILY, 60 s): **≈ 3.9 % eines Kerns (vorher ~3.8 %)** —
+kein sichtbarer Sprung. Die DAILY-Last ist primär Shell-Interpreter- und
+sysfs-Lesekosten je Tick, nicht die eliminierten Forks; die GAMING-Messung
+(SLEEP=2-Hebel) folgt beim nächsten Match-Zyklus.
+
 ---
 
 ## Features

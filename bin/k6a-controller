@@ -170,7 +170,7 @@ _auto_eval() {
     esac
     if [ "$topapp" = "1" ]; then
         _AUTO_HIT=$((_AUTO_HIT + 1))
-        _AUTO_LAST=$(date +%s)
+        _AUTO_LAST=$_NOWUP
     else
         _AUTO_HIT=0
     fi
@@ -221,7 +221,7 @@ LOCKDIR="$MODDIR/run/ctrl.lock"
 _startup() {
     mkdir -p "$MODDIR/run" "$MODDIR/config" "$MODDIR/webroot" 2>/dev/null
     if ! mkdir "$LOCKDIR" 2>/dev/null; then
-        OLD=$(cat "$PIDF" 2>/dev/null)
+    OLD=""; read -r OLD < "$PIDF" 2>/dev/null
         STALE=0
         if [ -z "$OLD" ]; then
             STALE=1
@@ -253,7 +253,7 @@ _startup() {
     _apply_cd_thresholds
     _fix_usb_autosuspend
     _turbo_recover
-    log "k6a-ctl v1.5.0 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
+    log "k6a-ctl v1.5.2 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -682,7 +682,8 @@ while true; do
     _cfg_maybe_load
     _ensure_gov
     _sync_legacy
-    TEMP_NOW=$(read_temp)
+    read_temp
+    _NOWUP=""; read -r _NOWUP < /proc/uptime 2>/dev/null; _NOWUP=${_NOWUP:-0}; _NOWUP=${_NOWUP%.*}
     _parse_status
     _gov_stale_check
 
@@ -691,8 +692,7 @@ while true; do
     elif [ "$MODE" = "auto" ]; then
         _auto_eval
         if [ "$STATE" = "GAMING" ]; then
-            _nowa=$(date +%s)
-            [ $(( _nowa - _AUTO_LAST )) -gt 10 ] && _enter_daily
+            [ $(( _NOWUP - _AUTO_LAST )) -gt 10 ] && _enter_daily
         elif [ "$_AUTO_HIT" -ge 2 ]; then
             _enter_gaming
         elif [ "$STATE" != "DAILY" ]; then
@@ -709,7 +709,7 @@ while true; do
         [ $(( TICK % 60 )) -eq 0 ] && _tune_game_threads
         [ "$DELEGATED" = "1" ] && [ -n "$TEMP_NOW" ] && _auto_badazz_switch "$TEMP_NOW"
         [ "$MODE" = "auto" ] && _set_game_pid "${_AUTO_PID:-0}"
-        SLEEP=1
+        SLEEP=2
     else
         SLEEP=5
     fi

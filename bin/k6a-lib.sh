@@ -76,10 +76,15 @@ _cache_thermal_zones() {
     log "zones: Gold=$TZ_GOLD Silver=$TZ_SILVER"
 }
 
-read_temp() { # liefert °C; rc=1 + leer wenn keine Zone lesbar
-    local t
-    t=$(cat "$TZ_GOLD" 2>/dev/null); [ -n "$t" ] && echo $(( t / 1000 )) && return 0
-    t=$(cat "$TZ_SILVER" 2>/dev/null); [ -n "$t" ] && echo $(( t / 1000 )) && return 0
+read_temp() { # v1.5.2: setzt TEMP_NOW (global, fork-free); rc=1 wenn keine Zone lesbar
+    TEMP_NOW=""
+    local t=""
+    read -r t < "$TZ_GOLD" 2>/dev/null
+    case "$t" in ""|*[!0-9]*) t="" ;; esac
+    if [ -n "$t" ]; then TEMP_NOW=$(( t / 1000 )); return 0; fi
+    read -r t < "$TZ_SILVER" 2>/dev/null
+    case "$t" in ""|*[!0-9]*) t="" ;; esac
+    if [ -n "$t" ]; then TEMP_NOW=$(( t / 1000 )); return 0; fi
     return 1
 }
 
@@ -100,8 +105,8 @@ _GOV_WARNED=0
 _ensure_gov() { # idempotent, laeuft pro tick
     local p g changed=0
     for p in "$P0" "$P6"; do
-        g=$(cat "$p/scaling_governor" 2>/dev/null)
-        [ "$g" = "schedutil" ] && continue
+        g=""; read -r g < "$p/scaling_governor" 2>/dev/null
+        case "$g" in schedutil) continue ;; esac
         w_checked "$p/scaling_governor" schedutil && changed=1
     done
     [ "$changed" = "1" ] && log "governor → schedutil"
