@@ -388,7 +388,27 @@ Erwartungswert der Arme klein — Sinn ist der saubere Ersatz für das
 Reviewer-Modul: gleiche Wirkung (OEM-Userpace-Brake aus), aber mit
 Kill-Switch (Settings auf 0), Recovery und ohne Zone-/Akku-Tricks des Moduls.
 
-## 2026-11-05 — v1.4.9: Token-Gate, Fork-Diet, mode=auto, P4-Watchdog (Review-Runde)
+### Am Gerät verifiziert (2026-11-07) — A10/A11-Serie, Lüfter, CODM
+- **A10** (2 Runden hintereinander, `turbo_stop_daemons=1`, spoof=0): Entry
+  → `turbo: thermal-daemons pausiert`, Exit → `turbo: oem-brake
+  wiederhergestellt` (mi_thermald/thermal-engine mit NEUEN PIDs neu
+  gestartet). ktemp max 76/77 °C, policy **99.9 % @1708800**, kstate
+  **0×cd (kein einziger Cooldown)**, PSI cpu max 25.76, GPU-normales
+  Frequenzspektrum, Spiel-Impression „flüssig“.
+- **A11** (1 Runde, beide Arme an): zusätzlich `turbo: temp-spoof 30°
+  aktiv (zone 26/temp 18/temp)` am Entry; io-Rows zeigen ktemp 68–73 °C
+  während Userspace-seitig 30000 gemountet ist — **Kernel-Beweis:** k6a_gov
+  liest REAL, Userspace-blind CONFIRMED. policy/kstate identisch zu A10
+  (99.9 % ×1708800, 0×cd). Mount-Aufbau/-Abbau + Daemon-Restore
+  idempotent über 3 Zyklen.
+- **CPU-Last-Messung** (Reviewer-Befund quantifiziert): Controller im
+  GAMING = **18 % eines Kerns** (57.4 s/302 s bzw. 55.78 s/303 s, beide
+  Runs identisch), im DAILY ≈ 3 %. Charakterisierung komplett; Optimierung
+  v1.5.2 (subshell-freie read_temp, _write_data ohne forks, SLEEP=2 im
+  Gaming) steht als Vorschlag an.
+- **Fazit**: beide Turbo-Arme funktionieren exakt wie designed (Daemon-
+  pause + Blind-mount), ohne messbares FPS/Temp-Delta — die R3-A/R4-B-
+  Basis bleibt der Maßstab. Release-Gate v1.5.1 erfüllt.
 
 ## 2026-11-05 — v1.4.9: Token-Gate, Fork-Diet, mode=auto, P4-Watchdog (Review-Runde)
 
