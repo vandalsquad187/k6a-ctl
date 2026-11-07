@@ -11,6 +11,18 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 > der Governor per `insmod` geladen und ist ohne Kernel-Flash nachrüstbar.
 > Ältere Kernel laufen, verlieren aber die Live-Cap-/BW-Statuswerte.
 
+## 2026-11-07 — v1.5.3: Fix v1.5.2-crash (P4-Muster: POSIX-read-Fallback)
+**v1.5.2 hatte einen Crash im auto-GAMING-Exit-check**: `/proc/uptime`
+wurde via `read -r _NOWUP < /proc/uptime` gelesen — POSIX-sh weist einer
+einzelnen Variablen die **ganze Zeile inkl. Leerzeichen** zu →
+`$(( _NOWUP - _AUTO_LAST ))` bricht im Tick ≥2 nach GAMING-Entry mit
+`unexpected '.'` → Shell-Exit 1 → service.sh-Re-Boot-Loop (Crashzikle alle
+~3 s, 19:11-19:14). Fix: `read -r _NOWUP _` (2. Dummy-Var nimmt den Rest)
++ numerischer Case-Guard (`*[!0-9]*` → 0). Am Gerät verifiziert: synaptic
+mode=gaming-GAMING-Entry war zuvor crash-frei (Exit-check lief dort nicht),
+auto-Match-Entry 19:42:42+30 s crash-frei (Vorher 19:40:33 exit-1 Zyklen).
+Betroffene Versionsbereiche: nur v1.5.2 (161/162). Debug-Harness (`DEBUG`-Trace über set -x + trace.log) blieb in v1.5.2a receipts.
+
 ## 2026-11-07 — v1.5.2: Fork-Diet im GAMING-Hot-Loop
 Ziel: Reviewer-Befund „Controller 18 % eines Kerns im Gaming" senken.
 Umgesetzt (ohne Semantik-Änderung):
