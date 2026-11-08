@@ -11,6 +11,54 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 > der Governor per `insmod` geladen und ist ohne Kernel-Flash nachrüstbar.
 > Ältere Kernel laufen, verlieren aber die Live-Cap-/BW-Statuswerte.
 
+## 2026-11-08 — v1.5.5: Turbo-Notbremse (Reviewer-Patch `turbo-safety`, inkl. Akku-Fallback)
+Reviewer-Beitrag mit Akku-Arm-Live-Fallback (Patch verbatim, Basis = v1.5.3).
+**Untere Grenzen (nicht übertreiben, pro Settings.conf überschreibbar):**
+- `TURBO_MAX_C=98` (SoC-Gold-Notbremse): liegt 2 °C über der k6a_gov-cd_l2-tier-Schwelle (96),
+  d.h. während Turbo ruht der Kernel-Deckel und die Notbremse fungiert als das Finite-Gate,
+  das GFP-Ausbrüche einfängt.
+- `TURBO_MAX_BATT_C=44` (Akku-Notbremse; re-arm nur unter 41 °C, `TURBO_MAX_BATT_C-3`):
+  der Akku-Arm der Notbremse ist die Second-Fan-Domain (USB-Toolbox-emulate-Route).
+- `TURBO_REARM_C=85` (Freigabe-Schwelle nach Trip): bewusst NICHT auf 80 gesenkt — bei
+  98-auslösend und Gaming-Profil-Abdrosselung ab 96 bleiben ~13 K Sperr-Abstand; 80
+  verlängert die Freigabe-Wartezeit (dicker, ohne zusätzliche Sicherheit). Wie immer
+  ist `TURBO_REARM_C` config-overridable, falls es später real nachzuziehen ist.
+- **Blind-Counter**: 5 Ticks ohne reale Kerntemperatur (`_TURBO_BLIND`) → Trip.
+- `_TURBO_LOCK` bleibt persistent bis ein echter `<85`-Readback; `_enter_daily`
+  resetet die Sperre (z. B. doel).
+
+**Kern der Notbremse**: unter Turbo (faked Zones `50000 Mmounts`) sind die OEM-Daemons
+und **Userspace-Zonen-Reader BLIND** — deshalb zählt nur die REALE Kernel-Temperatur aus
+`k6a_gov/status` (temp respektive `temp_peak` als Momentanwert — **keine Session-Ratchet-Station**,
+`read_temp()` setzt `temp_peak` pro Tick auf 0 und macht das Maximum der vier Gold-Zonen;
+keine Kaltstart-Pflicht) und der Batterie-Warm-Marker. Die Notbremse hat das exclusive
+Gate unmittelbar Ruhe → hierfür gilt: **FOG ist die Notbremse NOTBEAM live**, CANDIDATE:
+die Ctl-Senke muss laufen (solange der Controller TICKEN läuft, NOTBEAM live, ansonsten
+NICHT im cardiogram zu erleben). Der Trip-Wert ist in-line ergänzt über
+`k6a_gov/status`-Kanal, nicht über die fake-SZ-Mounts — deshalb NIE blind Anspruch.
+
+**Akku-Fallback (NEU in v1.5.5)**: ist `bt` aus dem Kernel-Status nicht lesbar
+(-1/leer), liest `_turbo_guard` `/sys/class/power_supply/battery/temp` direkt mit
+`read` (Zehntelgrad → /10; Builtin, kein Fork). Kernel-`bt` VOR ein sysfs-Lese,
+fehlende oder kaputte Datei → harmlos (bleibt `batt=0`). Der Akku-Arm hängt damit
+**nie** an k6a_gov. Reviewer-Stub-Tests: 44.1 °C löst aus, 35 °C nicht.
+
+**Bewährte Grenze (die "bt=-1"-Story Scharfstellen)**: BT=-1 ist kein "Kernel nicht
+verdrahtet" — der Kernel (**v1.7.0**) setzt `batt_temp_c = -1`, wenn `battery_guard`
+aus ist, und hält -1 auch bei Read-Errors. Der Controller wartet icing `battery_guard=1`
+via `_sync_batt_guard`, solange `BATT_GUARD=on` —giebt das Gerät hat `batt_guard=off`
+(R3-Referen Investigations), damit spendete DasGerät `bt=-1` (v1.7.0). **Build 434**
+(v1.7.1, BadazzKernel `e9eef01cf`) liest之父 den Kernel Akkutemp jeden Tick (auch
+guard=0) → `bt` Liefert die Echte Temperatur. Der Akku-Fallback in v1.5.5 ist
+sologen doppelt (bt live + sysfs-Fallback, Kernel-vorzug) — die NOTBEAM-ARM
+Arbeiten auf beiden Achsen (kernel-Status und sysfs), unabhängig.
+
+**Verifizierung (am Gerät)**: Zone-Typen übersp Shen — `thermal_zone26/type` =
+`cpu-1-0-usr`, `thermal_zone18/type` = `cpu-0-0-usr` (beweist die gold-CPU und
+silver-CPU-Zonen), im Notbrems-Mount log als `26(cpu-1-0-usr)` sichtbar. Die
+v1.5.4-Notbremse-Fire-Tests (dieselben Mechanismen) passierten am Gerät:
+gold=68C → Trip, OEM-Brake restore, re-arm <65, blind-Counter.
+
 ## 2026-11-07 — v1.5.3: Fix v1.5.2-crash (P4-Muster: POSIX-read-Fallback)
 **v1.5.2 hatte einen Crash im auto-GAMING-Exit-check**: `/proc/uptime`
 wurde via `read -r _NOWUP < /proc/uptime` gelesen — POSIX-sh weist einer
