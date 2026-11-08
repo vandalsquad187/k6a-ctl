@@ -11,6 +11,60 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 > der Governor per `insmod` geladen und ist ohne Kernel-Flash nachrüstbar.
 > Ältere Kernel laufen, verlieren aber die Live-Cap-/BW-Statuswerte.
 
+## 2026-11-07 — v1.5.4: Turbo-Notbremse (Reviewer-Beitrag „turbo-safety")
+### Begründung: Wer schützt währenddessen den Turbo?
+Unter Turbo sind bewusst **beide Userspace-Sicherheitsschichten blind**:
+- die OEM-Daemons (thermal-engine, mi_thermald) sind gestoppt,
+- die Zone-Files (thermal_zone26/18) lesen Userspace-seitig 30000.
+
+Die **einzige reale Quelle** ist dann der Kernel: `k6a_gov/status` liefert
+`temp`, `temp_peak` (Session-Ratchet, reset pro GAMING-Session) und
+`temp_valid`/`temp_src` — A11 hat das live bewiesen (ktemp 68–73 °C
+während der Userspace-Zone 30000 anzeigt).
+
+### Was neu ist (Reviewer-Patch, verbatim + Banner/Version)
+- `_turbo_guard()` läuft pro tick und liest **nur den Kernel**:
+  - `TURBO_MAX_C=98` (SoC-Gold-Notbremse — oberhalb der k6a_gov-cd_l2=96
+    Schwelle, greift nur, wenn der Kernel-Schutz selbst defekt ist),
+  - `TURBO_MAX_BATT_C=44` (Akku-Notbremse + re-arm bei < 41 °C),
+  - `TURBO_REARM_C=85` (wieder scharf erst unter 85 °C),
+  - **Blind-Counter**: 5 Ticks ohne reale Kerntemperatur → Notbremse
+    (SLEEP=2 → ~10 s).
+  - Überschreibbar via Env (`TURBO_MAX_C=…`), Defaults fest verankert.
+- **Type-Audit der Zonen** vor dem Fake-Mount: Zone-`type`-Strings wie
+  `batt/bms/charg/usb/pmi/pmN/skin/quiet/pa-/conn` werden übersprungen
+  ("kein SoC-Sensor"). Am Gerät: Zone26 = `cpu-1-0-usr`, Zone18 =
+  `cpu-0-0-usr` → beide bleiben gemountet; Log zeigt die Typen
+  `(cpu-1-0-usr)/(cpu-0-0-usr)`.
+- `TEMP_NOW`-Korrektur: bei `temp_valid=1` übernimmt der Controller die
+  Kernel-Temperatur statt der gespoofeten 30 °C → die existing
+  `_auto_badazz_switch` nutzt die reale Temperatur (vorher: blind).
+- `_enter_daily` resetet `_TURBO_LOCK`; Notbremse ist NICHT mega-persistent:
+  DAILY-Modus = kühler Zustand, bei GAMING-Entry greift der Guard sofort und
+  sperrt wildlife wieder, wenn es > 85 °C ist.
+
+### Live-Verifizierung (02:48-Zeitfenster, Fire-Test via `TURBO_MAX_C=-40_MODE Follow-up)
+- `NOTBREMSE gold=68C batt=0C → OEM-Brake wieder an, gesperrt bis real < 85C` ✓
+  (nachtyped off) + `_turbo_off` = `oem-brake wiederhergestellt` ✓
+- `Sperre aufgehoben (gold=65C batt=0C)` → automatisches `_turbo_on` ✅ fresh-test
+  (REARM-Zweig arbeitet). Mit den REAL-Grenzen (98) → die Branches bleiben
+  unaufgerufen, keine Logs — der normale Turbo läuft unverändert.
+
+### Bekannte Grenze: der Akku-Arm der Notbremse ist derzeit DORMANT
+- `k6a_gov/status` liefert **`bt=-1`** (nicht verdrahtet, build432):
+  `_turbo_guard`'s `batt` ist 0 < 44 → feuert nie. Die Notbremse arbeitet
+  rein über die SoC-Temperatur + der Blind-Counter. **Kernel-side
+  Follow-up (v1.7.1)**: `bt` in `status` mit
+  `/sys/class/power_supply/battery/temp` füllen (GitHub-Issue im
+  BadazzKernel-Repo). aktiviert den Reviewer's Akku-Arm automatisch.
+
+### Mess-Bezug (dieses Session)
+- v1.5.1-GAMING-CPU-Load: **18 %** eines Kerns; v1.5.3 (SLEEP=2): **~9 %**
+  (Lobby+Match 243-s-Fenster). Der Notbrems-Guard kostet keine Forks
+  (reine `case`-Checks), die keine Last delta.
+- v1.5.2 Crash-Bug (POSIX-sh read-Fördergang, `/proc/uptime`): behoben
+  in v1.5.3; v1.5.4 erbt den Fix.
+
 ## 2026-11-07 — v1.5.3: Fix v1.5.2-crash (P4-Muster: POSIX-read-Fallback)
 **v1.5.2 hatte einen Crash im auto-GAMING-Exit-check**: `/proc/uptime`
 wurde via `read -r _NOWUP < /proc/uptime` gelesen — POSIX-sh weist einer

@@ -119,7 +119,7 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
 # ── v1.4.9: status parsen ohne forks (while-read direkt aus der Node) ────────
 _parse_status() {
     _STV=""; _SSTATE=""; _STEMP=""; _STHROT=""; _SPMAX=""; _SAGE=""; _SVSRC=""; _SVVAL=""
-    _SHASHV=""; _SHASHS=""; _SBW1=""; _SBW2=""; _SHIST=""
+    _SHASHV=""; _SHASHS=""; _SBW1=""; _SBW2=""; _SHIST=""; _SBT=""; _SPEAK=""
     _sl=""; _kk=""; _vv=""
     [ -r "$GOV/status" ] || return 0
     while IFS= read -r _sl; do
@@ -139,6 +139,8 @@ _parse_status() {
             bw_floor_gpubw) _SBW1=$_vv ;;
             bw_floor_llcc) _SBW2=$_vv ;;
             hist) _SHIST=$_vv ;;
+            bt) _SBT=$_vv ;;
+            temp_peak) _SPEAK=$_vv ;;
         esac
     done < "$GOV/status"
     return 0
@@ -254,7 +256,7 @@ _startup() {
     _apply_cd_thresholds
     _fix_usb_autosuspend
     _turbo_recover
-    log "k6a-ctl v1.5.3 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
+    log "k6a-ctl v1.5.4 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -424,6 +426,8 @@ _apply_cd_thresholds() {
 #   * Bind-Mounts + Daemon-Restore sind wiederholbar (recovery) & reversibel
  _TURBO_ZONES="/sys/devices/virtual/thermal/thermal_zone26/temp /sys/devices/virtual/thermal/thermal_zone18/temp"
 _TURBO_ACTIVE=0
+_TURBO_LOCK=0        # 1 = Notbremse hat ausgeloest: kein Turbo, bis real abgekuehlt
+_TURBO_BLIND=0       # Ticks ohne reale Kerntemperatur im status
 # absolute Pfade — Mount-Binaries nicht von $PATH abhängig machen (su/ksu-Shells
 # haben je nach Context verschiedene PATHs)
 _MOUNT=/system/bin/mount
@@ -443,6 +447,7 @@ _turbo_recover() { # Controller-Cold-Start: Rest-Mounts räumen, Daemons sichers
 }
 _turbo_on() {
     [ "$TURBO_STOP" = "1" ] || [ "$TURBO_SPOOF" = "1" ] || return 0
+    [ "$_TURBO_LOCK" = "1" ] && return 0
     if [ "$TURBO_STOP" = "1" ] && [ "$_TURBO_ACTIVE" != "1" ]; then
         setprop ctl.stop vendor.thermal-engine 2>/dev/null
         setprop ctl.stop mi_thermald 2>/dev/null
@@ -452,11 +457,17 @@ _turbo_on() {
     # /dev/block/dm-XX, NICHT den Dateinamen — "grep faketemp" findet nix)
     if [ "$TURBO_SPOOF" = "1" ] && ! $_MOUNT 2>/dev/null | grep -qF -- " on /sys/devices/virtual/thermal/thermal_zone26/temp type "; then
         printf '30000\n' > "$MODDIR/run/faketemp" 2>/dev/null
-        local z ok=""
+        local z zt ok=""
         for z in $_TURBO_ZONES; do
             [ -f "$z" ] || continue
+            # Zonen-Index ist nicht garantiert stabil: nie Akku-/Lade-/Gehaeuse-Sensoren faken
+            zt=""; read -r zt < "${z%/temp}/type" 2>/dev/null
+            case "$zt" in
+                *batt*|*bms*|*charg*|*usb*|*pmi*|*pm[0-9]*|*skin*|*quiet*|*pa-*|*conn*)
+                    log "turbo: Zone $z (type=$zt) uebersprungen — kein SoC-Sensor"; continue ;;
+            esac
             if $_MOUNT --bind "$MODDIR/run/faketemp" "$z" 2>/dev/null; then
-                ok="$ok ${z##*/thermal_zone}"
+                ok="$ok ${z##*/thermal_zone}(${zt:-?})"
             else
                 log "turbo: mount fail $z"
             fi
@@ -475,6 +486,35 @@ _turbo_off() {
     setprop ctl.start mi_thermald 2>/dev/null
     log "turbo: oem-brake wiederhergestellt (mounts aus, daemons on)"
     _TURBO_ACTIVE=0
+}
+
+# ── v1.5.4: Turbo-Notbremse ─────────────────────────────────────────────────
+# Unter Turbo sind OEM-Daemons und Userspace-Zonen-Reader blind. Deshalb zaehlt hier nur die
+# REALE Kernel-Temperatur aus k6a_gov/status (temp, temp_peak, bt). Greift eine Grenze,
+# kommt die OEM-Brake sofort zurueck; neu scharf erst nach echtem Abkuehlen.
+#   TURBO_MAX_C (98), TURBO_MAX_BATT_C (44), TURBO_REARM_C (85) per Umgebung/Config ueberschreibbar
+_turbo_guard() {
+    local _tt=0 _bb=0 _pk=0
+    case "$_STEMP" in ""|*[!0-9]*) ;; *) _tt=$_STEMP ;; esac
+    case "$_SPEAK" in ""|*[!0-9]*) ;; *) _pk=$_SPEAK ;; esac
+    [ "$_pk" -gt "$_tt" ] && _tt=$_pk
+    case "$_SBT" in ""|*[!0-9]*) ;; *) _bb=$_SBT ;; esac
+    # echte Kerntemperatur bevorzugen: die Zonen-Files sind unter Turbo-Spoof ggf. gefaked
+    if [ "$_SVVAL" = "1" ]; then
+        case "$_STEMP" in ""|*[!0-9]*) ;; *) TEMP_NOW=$_STEMP ;; esac
+    fi
+    if [ "$_TURBO_ACTIVE" = "1" ]; then
+        if [ "$_tt" -le 0 ]; then _TURBO_BLIND=$(( _TURBO_BLIND + 1 )); else _TURBO_BLIND=0; fi
+        if [ "$_tt" -ge "${TURBO_MAX_C:-98}" ] || [ "$_bb" -ge "${TURBO_MAX_BATT_C:-44}" ] || [ "$_TURBO_BLIND" -ge 5 ]; then
+            _turbo_off; _TURBO_LOCK=1; _TURBO_BLIND=0
+            log "turbo: NOTBREMSE gold=${_tt}C batt=${_bb}C -> OEM-Brake wieder an, gesperrt bis real < ${TURBO_REARM_C:-85}C"
+        fi
+    elif [ "$_TURBO_LOCK" = "1" ] && [ "$_tt" -gt 0 ] && [ "$_tt" -lt "${TURBO_REARM_C:-85}" ] \
+         && [ "$_bb" -lt "$(( ${TURBO_MAX_BATT_C:-44} - 3 ))" ]; then
+        _TURBO_LOCK=0
+        log "turbo: Sperre aufgehoben (gold=${_tt}C batt=${_bb}C)"
+        [ "$STATE" = "GAMING" ] && _turbo_on
+    fi
 }
 
 # ── state transitions ───────────────────────────────────────────────────────
@@ -512,6 +552,7 @@ _enter_daily() {
         log "-> DAILY (legacy, gold_cap=${CAP_D:-off}, silver_cap=default, gpu_cap=default)"
     fi
     _turbo_off
+    _TURBO_LOCK=0
 }
 
 _enter_gaming() {
@@ -686,6 +727,7 @@ while true; do
     read_temp
     _NOWUP=""; read -r _NOWUP _ < /proc/uptime 2>/dev/null; _NOWUP=${_NOWUP:-0}; case "$_NOWUP" in *[!0-9]*) _NOWUP=0 ;; esac; _NOWUP=${_NOWUP%.*}
     _parse_status
+    _turbo_guard
     _gov_stale_check
 
     if [ "$MODE" = "gaming" ]; then
