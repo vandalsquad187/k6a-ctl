@@ -11,6 +11,19 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 > der Governor per `insmod` geladen und ist ohne Kernel-Flash nachrüstbar.
 > Ältere Kernel laufen, verlieren aber die Live-Cap-/BW-Statuswerte.
 
+## 2026-11-09 — v1.5.6: Daily-Restore vervollständigt (hispeed) + Lifecycle-Guard
+- **Daily-Restore (hispeed_load/hispeed_freq)**: `_apply_schedutil daily` schrieb bislang
+  nur `up/down_rate_limit_us` (10000/50000) zurück — `hispeed_load`/`hispeed_freq` blieben
+  auf den GAMING-Werten stehen (hl=50, hf=Gold-Zwicker/P6-Zmax). Im Daily-Idle boostete
+  dann jede Task mit Load ≥ 50 % bei 1939200/2304000 Hz im Hintergrund weiter. Fix: der
+  Daily-Zweig schreibt jetzt Stockwerte `hispeed_load=90` + `hispeed_freq=0` auf beiden
+  Clustern (P0 und P6); am Gerät live verifiziert (hl=90 hf=0 auf cpu0/4/6/7 nach `-> DAILY`).
+- **Lifecycle-Guard**: im auto-Mode zählt 5 aufeinanderfolgende Ticks mit `STATE=GAMING`
+  während Kernel-Truth `state ≠ gaming && game_pid = 0` → Force-Daily mit Log-Zeile
+  (`P18-GUARD: …`). Der reguläre `>10 s`-Exit bleibt primär; der Guard ist Backup gegen
+  hängende Phasen-Übergänge.
+- Keine Fork-Änderungen (Fork-Diet folgt als v1.6.0), CPU-Budget unverändert.
+
 ## 2026-11-08 — v1.5.5: Turbo-Notbremse (Reviewer-Patch `turbo-safety`, inkl. Akku-Fallback)
 Reviewer-Beitrag mit Akku-Arm-Live-Fallback (Patch verbatim, Basis = v1.5.3).
 **Untere Grenzen (nicht übertreiben, pro Settings.conf überschreibbar):**

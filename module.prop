@@ -1,6 +1,6 @@
 id=k6a-ctl
 name=k6a-ctl
-version=1.5.5
-versionCode=165
+version=1.5.6
+versionCode=166
 author=BadaZz89
-description=Two-mode (daily/gaming) governor companion for BadazzKernel: gold-cluster cap, persistent (idempotent written) cd_thresholds 96/99/102/93, schedutil tuning, delegates to in-kernel k6a_gov. Single-source config, localhost WebUI. v1.5.0: turbo — Thermal-Brake-Controller (turbo_stop_daemons: vendor.thermal-engine+mi_thermald Pause im Gaming; turbo_spoof_temp: 30°-Fake-Temp Bind-Mount auf SoC-Zonen, k6a/kernel-Sensorkette bleibt real, Akku/BCL unangetastet) mit Recover beim Watchdog-Restart. v1.5.1: WebUI-Härtung (setcfg-RMW-Lock, Token aus REQ-Log redigiert), kver_ok akzeptiert k6a_gov 1.10+. v1.5.2: Fork-Diet — SLEEP=2 im Gaming, read_temp/_ensure_gov/PID-Lese/_AUTO-Hysterese ohne Subshells/(cat/date), Controller-CPU Ziel ≪18 %.)
+description=Two-mode (daily/gaming) governor companion for BadazzKernel: gold-cluster cap, persistent (idempotent written) cd_thresholds 96/99/102/93, schedutil tuning, delegates to in-kernel k6a_gov. Single-source config, localhost WebUI. v1.5.0: turbo — Thermal-Brake-Controller (turbo_stop_daemons: vendor.thermal-engine+mi_thermald Pause im Gaming; turbo_spoof_temp: 30°-Fake-Temp Bind-Mount auf SoC-Zonen, k6a/kernel-Sensorkette bleibt real, Akku/BCL unangetastet) mit Recover beim Watchdog-Restart. v1.5.1: WebUI-Härtung (setcfg-RMW-Lock, Token aus REQ-Log redigiert), kver_ok akzeptiert k6a_gov 1.10+. v1.5.2: Fork-Diet — SLEEP=2 im Gaming, read_temp/_ensure_gov/PID-Lese/_AUTO-Hysterese ohne Subshells/(cat/date), Controller-CPU Ziel ≪18 %.) v1.5.6: Daily-Restore vervollständigt (hispeed_load/hispeed_freq zurück im Idle), Lifecycle-Watchdog gegen hängende GAMING-Phase.

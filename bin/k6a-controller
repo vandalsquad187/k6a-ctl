@@ -38,7 +38,7 @@ STATE=""; TICK=0; IDLE=0; _PREV=0; _GAMING_APPLIED=0
 _STE_PREV=""; _STE_N=0; _STE_TRIED=0
 _GM_SET=""; _VP_SET=""
 _FORCE_DATA=0; _CFG_SIG="__unset__"; _MODVER=""
-_AUTO_PID=""; _AUTO_HIT=0; _AUTO_LAST=0; _HIST=""; _lsf_state=""
+_AUTO_PID=""; _AUTO_HIT=0; _AUTO_LAST=0; _P18_N=0; _HIST=""; _lsf_state=""
 _STV=""; _SSTATE=""; _STEMP=""; _STHROT=""; _SPMAX=""; _SAGE=""; _SVSRC=""; _SVVAL=""
 _SHASHV=""; _SHASHS=""; _SBW1=""; _SBW2=""; _SHIST=""
 SILCAP_G="0"; GPUCAP_G="0"
@@ -119,7 +119,7 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
 # ── v1.4.9: status parsen ohne forks (while-read direkt aus der Node) ────────
 _parse_status() {
     _STV=""; _SSTATE=""; _STEMP=""; _STHROT=""; _SPMAX=""; _SAGE=""; _SVSRC=""; _SVVAL=""
-    _SHASHV=""; _SHASHS=""; _SBW1=""; _SBW2=""; _SHIST=""; _SBT=""; _SPEAK=""
+    _SHASHV=""; _SHASHS=""; _SBW1=""; _SBW2=""; _SHIST=""; _SBT=""; _SPEAK=""; _SGPID=""
     _sl=""; _kk=""; _vv=""
     [ -r "$GOV/status" ] || return 0
     while IFS= read -r _sl; do
@@ -128,6 +128,7 @@ _parse_status() {
         case "$_kk" in
             version) _STV=$_vv ;;
             state) _SSTATE=$_vv ;;
+            game_pid) _SGPID=$_vv ;;
             temp) _STEMP=$_vv ;;
             throttle_events) _STHROT=$_vv ;;
             policy_max) _SPMAX=$_vv ;;
@@ -256,7 +257,7 @@ _startup() {
     _apply_cd_thresholds
     _fix_usb_autosuspend
     _turbo_recover
-    log "k6a-ctl v1.5.5 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
+    log "k6a-ctl v1.5.6 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -321,6 +322,10 @@ _apply_schedutil() { # $1=gaming|daily
         w "$P0/schedutil/down_rate_limit_us" 50000
         w "$P6/schedutil/up_rate_limit_us" 10000
         w "$P6/schedutil/down_rate_limit_us" 50000
+        w "$P0/schedutil/hispeed_load" 90
+        w "$P0/schedutil/hispeed_freq" 0
+        w "$P6/schedutil/hispeed_load" 90
+        w "$P6/schedutil/hispeed_freq" 0
         [ -d "$ib" ] && w "$ib/input_boost_ms" 0
     fi
 }
@@ -743,6 +748,19 @@ while true; do
         _auto_eval
         if [ "$STATE" = "GAMING" ]; then
             [ $(( _NOWUP - _AUTO_LAST )) -gt 10 ] && _enter_daily
+            if [ "$STATE" = "GAMING" ]; then
+                # v1.5.6 Lifecycle-Guard: Kernel-Truth-Backup fuer verhungerten GAMING-Exit
+                if [ "$_SSTATE" = "gaming" ] || [ "${_SGPID:-0}" != "0" ]; then
+                    _P18_N=0
+                else
+                    _P18_N=$((_P18_N + 1))
+                    [ "$_P18_N" -ge 5 ] && {
+                        log "P18-GUARD: STATE=GAMING aber kern=($_SSTATE,pid=$_SGPID) x$_P18_N — force-daily"
+                        _P18_N=0
+                        _enter_daily
+                    }
+                fi
+            fi
         elif [ "$_AUTO_HIT" -ge 2 ]; then
             _enter_gaming
         elif [ "$STATE" != "DAILY" ]; then
