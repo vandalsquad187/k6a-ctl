@@ -23,6 +23,22 @@
 # v1.4.2: silver_cap_gaming (policy0) + gpu_cap_gaming (kgsl) deckel, Kappe
 # v1.4.3: thermal_protect wirksam (on=Deckel/mäß, off=Deckel pausiert); Gold-Cap-UI-Toggle
 # v1.4.5: webui-watchdog (respawn, wenn webui-server-wrapper tot)
+# v1.6.0: Fork-Diet + r3-Items (r3 = Verifizierungsrunde 2026-11-09):
+#   P6  pidof|awk (2 forks je Aufruf) → pidof nur 1x pro Tick in _auto_eval;
+#       _apply_gaming_userspace/_tune_game_threads übernehmen pid als Argument
+#       ($1=_AUTO_PID im Auto-Modus, sonst eigener pidof ohne awk-Truncation).
+#   P7  date +%s in _write_data → epoch wird ab jetzt aus /proc/uptime abge-
+#       leitet (_EPOCH0/_UP0 einmalig im _startup); date-Fork 1x pro Lauf.
+#   P8  stat-Signatur in _cfg_maybe_load (stat + $( ) = 2 forks/Tick) →
+#       Content-Compare per read-Loop (0 forks), neu _CFG_SNAP statt _CFG_SIG.
+#   P10 cat<<EOF in _write_data → printf-Blob in einer Variable (0 forks);
+#       mv bleibt für atomaren Tausch.
+#   (a) r3-Fund "Residual-Prozess": Swipe-from-recents lässt einen cached
+#       CODM-Prozess leben; _auto_eval scannt deshalb ALLE pidof-Treffer auf
+#       top-app (vorher nur der erste). HB-Diag-Zeile erweitert: pid/hit/miss.
+#   (b) Kernel-Label-Ghost (kstatus state=gaming bei enabled=0) ist kernel-
+#       seitig ohne schreibbare state-Node nicht durch die ctl zu lösen →
+#       Kernel-Patch (build435) vorgesehen.
 
 MODDIR="${1:-/data/adb/modules/k6a-ctl}"
 CONFIG="$MODDIR/config/settings.conf"
@@ -37,8 +53,9 @@ export MODDIR LOG_FILE=$LOG
 STATE=""; TICK=0; IDLE=0; _PREV=0; _GAMING_APPLIED=0
 _STE_PREV=""; _STE_N=0; _STE_TRIED=0
 _GM_SET=""; _VP_SET=""
-_FORCE_DATA=0; _CFG_SIG="__unset__"; _MODVER=""
-_AUTO_PID=""; _AUTO_HIT=0; _AUTO_LAST=0; _P18_N=0; _HIST=""; _lsf_state=""
+_FORCE_DATA=0; _CFG_SNAP="__unset__"; _MODVER=""
+_AUTO_PID=""; _AUTO_HIT=0; _AUTO_LAST=0; _AUTO_FG_MISS=0; _P18_N=0; _HIST=""; _lsf_state=""
+_EPOCH0=0; _UP0=0
 _STV=""; _SSTATE=""; _STEMP=""; _STHROT=""; _SPMAX=""; _SAGE=""; _SVSRC=""; _SVVAL=""
 _SHASHV=""; _SHASHS=""; _SBW1=""; _SBW2=""; _SHIST=""
 SILCAP_G="0"; GPUCAP_G="0"
@@ -147,36 +164,50 @@ _parse_status() {
     return 0
 }
 
-# ── v1.4.9: settings.conf nur neu laden, wenn stat-Signatur aendert ──────────
+# ── v1.4.9/v1.6.0: settings.conf nur neu laden, wenn Inhalt aendert (0 forks) ─
+# P8: stat+$( ) kostete 2 forks/Tick — jetzt Content-Compare per read-Loop
 _cfg_maybe_load() {
-    local sig
-    sig=$(stat -c '%s %Y' "$CONFIG" 2>/dev/null) || sig="x"
-    [ "$sig" = "$_CFG_SIG" ] && return 0
-    _CFG_SIG="$sig"
+    local _cl _new=""
+    if [ -f "$CONFIG" ]; then
+        while IFS= read -r _cl || [ -n "$_cl" ]; do
+            _new="$_new$_cl
+"
+        done < "$CONFIG" 2>/dev/null
+    fi
+    [ "$_new" = "$_CFG_SNAP" ] && return 0
+    _CFG_SNAP=$_new
     cfg_load
 }
 
-# ── v1.4.9: auto-erkennung (pidof + cgroup top-app, zero forks im cgroup-lesen)
+# ── v1.4.9/v1.6.0: auto-erkennung (pidof + cgroup top-app, 1 fork/Tick) ──────
+# r3-Fund "Residual-Prozess": Swipe-from-recents lässt einen cached CODM-
+# Prozess am Leben; der ERSTE pidof-Treffer allein sagt nichts über den
+# Vordergrund-Zustand der App. Deshalb: JEDEN Treffer scannen, _AUTO_HIT
+# zählt, sobald EINER top-app sitzt; _AUTO_FG_MISS zählt Ticks ohne jeden
+# top-app-Treffer (Diagnostik, HB-Zeile).
 _auto_eval() {
-    local pid pidset topapp=0 _l1 _l2 _l3 _l4 _l5 _l6 _l7 _l8 _l9 _l10 _l11 _l12 _l13 _cgv
+    local pidset pid topapp=0 _l1 _l2 _l3 _l4 _l5 _l6 _l7 _l8 _l9 _l10 _l11 _l12 _l13 _cgv
     pidset=$(pidof "$PKG" 2>/dev/null) || pidset=""
-    pid=${pidset%%[ ]*}
+    pid=${pidset%% *}
     _AUTO_PID="${pid:-0}"
     if [ -z "$pid" ]; then
-        _AUTO_HIT=0
+        _AUTO_HIT=0; _AUTO_FG_MISS=$((_AUTO_FG_MISS + 1))
         return 0
     fi
-    _l1=""; _l2=""; _l3=""; _l4=""; _l5=""; _l6=""; _l7=""; _l8=""; _l9=""; _l10=""; _l11=""; _l12=""; _l13=""
-    { read _l1; read _l2; read _l3; read _l4; read _l5; read _l6; read _l7; read _l8; read _l9; read _l10; read _l11; read _l12; read _l13; } < "/proc/$pid/cgroup" 2>/dev/null
-    _cgv="$_l1 $_l2 $_l3 $_l4 $_l5 $_l6 $_l7 $_l8 $_l9 $_l10 $_l11 $_l12 $_l13"
-    case "$_cgv" in
-        *top-app*) topapp=1 ;;
-    esac
+    topapp=0
+    for pid in $pidset; do
+        _l1=""; _l2=""; _l3=""; _l4=""; _l5=""; _l6=""; _l7=""; _l8=""; _l9=""; _l10=""; _l11=""; _l12=""; _l13=""
+        { read _l1; read _l2; read _l3; read _l4; read _l5; read _l6; read _l7; read _l8; read _l9; read _l10; read _l11; read _l12; read _l13; } < "/proc/$pid/cgroup" 2>/dev/null
+        _cgv="$_l1 $_l2 $_l3 $_l4 $_l5 $_l6 $_l7 $_l8 $_l9 $_l10 $_l11 $_l12 $_l13"
+        case "$_cgv" in
+            *top-app*) topapp=1; break ;;
+        esac
+    done
     if [ "$topapp" = "1" ]; then
-        _AUTO_HIT=$((_AUTO_HIT + 1))
+        _AUTO_HIT=$((_AUTO_HIT + 1)); _AUTO_FG_MISS=0
         _AUTO_LAST=$_NOWUP
     else
-        _AUTO_HIT=0
+        _AUTO_HIT=0; _AUTO_FG_MISS=$((_AUTO_FG_MISS + 1))
     fi
     return 0
 }
@@ -243,6 +274,15 @@ _startup() {
     fi
     trap 'rm -rf "$LOCKDIR"; rm -f "$PIDF"; exit' INT TERM
     echo $$ > "$PIDF"
+    # v1.6.0/P7: epoch-Referenz einmalig — _write_data leitet ts ab jetzt aus
+    # /proc/uptime-Delta ab (spart date-Fork je Write; solange kein NTP-Sprung)
+    # Achtung: /proc/uptime = Feld1=Uptime-Sekunden (float), Feld2=Idle-Aggregat
+    {
+        read -r "_UP0" "__u" < /proc/uptime 2>/dev/null
+        _UP0=${_UP0%%.*}
+        case "$_UP0" in ''|*[!0-9]*) _UP0=0 ;; esac
+        _EPOCH0=$(date +%s)
+    }
     rm -f "$MODDIR"/run/*.tmp 2>/dev/null
     cfg_load; _cache_thermal_zones; _init_freq_tables
     _MODVER=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null)
@@ -257,7 +297,7 @@ _startup() {
     _apply_cd_thresholds
     _fix_usb_autosuspend
     _turbo_recover
-    log "k6a-ctl v1.5.6 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
+    log "k6a-ctl v1.6.0 start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -289,8 +329,10 @@ _apply_profile() { # $1=profile-name
 _auto_badazz_switch() { # $1=current_temp
     local t=$1 cur_profile
     [ "$PROFILE" = "gaming" ] || return 0
-    cur_profile=$(gov_read "profile" 2>/dev/null | tr -d ' \n\r\t')
+    cur_profile=""   # v1.6.0: read-Builtin statt gov_read|tr (2 forks je Tick)
+    read -r cur_profile < "$GOV/profile" 2>/dev/null
     if [ "$STATE" = "GAMING" ] && [ "$t" -ge "$AUTO_BT" ] 2>/dev/null; then
+
         case "$cur_profile" in
             1|gaming) _apply_profile "badazz_safe"; log "auto → badazz_safe @ ${t}°C (hyst ${AUTO_HYST})" ;;
         esac
@@ -330,10 +372,9 @@ _apply_schedutil() { # $1=gaming|daily
     fi
 }
 
-_apply_gaming_userspace() { # billig: bei Entry + pro 5 Ticks (F13)
-    _apply_schedutil gaming
-    local pid
-    pid=$(pidof "$PKG" 2>/dev/null | awk '{print $1}')
+_apply_gaming_userspace() { # bei Entry + pro 5 Ticks (F13); $1=pid optional — v1.6.0/P6 ohne awk-Fork
+    local pid="${1:-}"
+    case "$pid" in ""|0) pid=$(pidof "$PKG" 2>/dev/null); pid=${pid%% *} ;; esac
     _set_game_pid "$pid"
     if [ "$_GM_SET" != "1" ]; then
         setprop persist.sys.game_mode 1 2>/dev/null; _GM_SET=1
@@ -344,9 +385,10 @@ _apply_gaming_userspace() { # billig: bei Entry + pro 5 Ticks (F13)
 }
 
 _tune_game_threads() { # billig: renice/oom nur — taskset entfallen (Android-cpuset setzt zurück)
-    local pid
-    pid=$(pidof "$PKG" 2>/dev/null | awk '{print $1}')
+    local pid="${1:-}"
+    case "$pid" in ""|0) pid=$(pidof "$PKG" 2>/dev/null); pid=${pid%% *} ;; esac
     [ -n "$pid" ] || return 0
+    [ -d "/proc/$pid" ] || return 0
     renice -n -10 "$pid" >/dev/null 2>&1
     echo -17 > "/proc/$pid/oom_adj" 2>/dev/null
 }
@@ -587,8 +629,9 @@ _enter_gaming() {
 
 # ── write data for webui (v1.4.9: zero-fork-node-reads, Takt vom Aufrufer) ──
 _write_data() {
-    local t=$1 _now cs cg gm gn bpc btp btpc gv gs gt gte gpf ghv ghs gpc gbw gbl ghe gpm gas gts gtv gbg gbt gpid
-    _now=$(date +%s)
+    local t=$1 _now cs cg gm gn bpc btp btpc gv gs gt gte gpf ghv ghs gpc gbw gbl ghe gpm gas gts gtv gbg gbt gpid _dpb
+    # v1.6.0/P7: epoch abgeleitet statt date-Fork je Write (_EPOCH0/_UP0 aus _startup)
+    _now=$(( _EPOCH0 + _NOWUP - _UP0 ))
 
     gn=""; read -r gn < "$P0/scaling_cur_freq" 2>/dev/null || gn=0; cs=$(( ${gn:-0} / 1000 ))
     gn=""; read -r gn < "$P6/scaling_cur_freq" 2>/dev/null || gn=0; cg=$(( ${gn:-0} / 1000 ))
@@ -624,8 +667,8 @@ _write_data() {
         _lsf_state=$_SSTATE
     fi
 
-    cat > "${DATA}.tmp" << EOF
-state=$STATE
+    # v1.6.0/P10: printf-Blob statt cat<<EOF (0 forks); mv bleibt atomar
+    _dpb="state=$STATE
 mode=$MODE
 thermal_protect=$THP
 gold_cap=$CAP_G
@@ -656,8 +699,8 @@ gov_temp_src=$gts
 gov_temp_valid=$gtv
 gov_batt_guard=$gbg
 gov_game_pid=$gpid
-gov_hist=${_HIST}
-EOF
+gov_hist=${_HIST}"
+    printf '%s\n' "$_dpb" > "${DATA}.tmp" 2>/dev/null
     mv "${DATA}.tmp" "$DATA"
 }
 
@@ -729,7 +772,7 @@ _startup
 
 log "main loop"
 while true; do
-    OLD=$(cat "$PIDF" 2>/dev/null)
+    OLD=""; read -r OLD < "$PIDF" 2>/dev/null    # v1.6.0: read statt cat (0 forks)
     if [ -n "$OLD" ] && [ "$OLD" != "$$" ] && [ -d "/proc/$OLD" ]; then exit 0; fi
     echo $$ > "$PIDF"
 
@@ -737,7 +780,7 @@ while true; do
     _ensure_gov
     _sync_legacy
     read_temp
-    _NOWUP=""; read -r _NOWUP _ < /proc/uptime 2>/dev/null; _NOWUP=${_NOWUP:-0}; case "$_NOWUP" in *[!0-9]*) _NOWUP=0 ;; esac; _NOWUP=${_NOWUP%.*}
+    _NOWUP=""; read -r _NOWUP _ < /proc/uptime 2>/dev/null; _NOWUP=${_NOWUP:-0}; _NOWUP=${_NOWUP%.*}; case "$_NOWUP" in *[!0-9]*) _NOWUP=0 ;; esac
     _parse_status
     _turbo_guard
     _gov_stale_check
@@ -772,9 +815,9 @@ while true; do
 
     if [ "$STATE" = "GAMING" ]; then
         _apply_caps_gaming
-        [ "$_GAMING_APPLIED" = "0" ] && { _apply_gaming_userspace; _tune_game_threads; _GAMING_APPLIED=1; }
-        [ $(( TICK % 5 )) -eq 0 ] && _apply_gaming_userspace
-        [ $(( TICK % 60 )) -eq 0 ] && _tune_game_threads
+        [ "$_GAMING_APPLIED" = "0" ] && { _apply_gaming_userspace "${_AUTO_PID:-}"; _tune_game_threads "${_AUTO_PID:-}"; _GAMING_APPLIED=1; }
+        [ $(( TICK % 5 )) -eq 0 ] && _apply_gaming_userspace "${_AUTO_PID:-}"
+        [ $(( TICK % 60 )) -eq 0 ] && _tune_game_threads "${_AUTO_PID:-}"
         [ "$DELEGATED" = "1" ] && [ -n "$TEMP_NOW" ] && _auto_badazz_switch "$TEMP_NOW"
         [ "$MODE" = "auto" ] && _set_game_pid "${_AUTO_PID:-0}"
         SLEEP=2
@@ -798,6 +841,6 @@ while true; do
         fi
     }
     TICK=$(( TICK + 1 ))
-    [ $(( TICK % 60 )) -eq 0 ] && { _sync_batt_guard; log "hb tick=$TICK state=$STATE temp=${TEMP_NOW:--} delegated=$DELEGATED"; }
+    [ $(( TICK % 60 )) -eq 0 ] && { _sync_batt_guard; log "hb tick=$TICK state=$STATE temp=${TEMP_NOW:--} delegated=$DELEGATED pid=${_AUTO_PID:-0} hit=$_AUTO_HIT miss=$_AUTO_FG_MISS"; }
     sleep $SLEEP
 done

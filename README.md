@@ -11,6 +11,27 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 > der Governor per `insmod` geladen und ist ohne Kernel-Flash nachrüstbar.
 > Ältere Kernel laufen, verlieren aber die Live-Cap-/BW-Statuswerte.
 
+## 2026-11-09 — v1.6.0: Fork-Diet-2 + r3-Items (Exit-Semantik repariert)
+- **Exit-Bug-Fund (r3-Mystery aufgelöst)**: der auto-Mode-`>10 s`-Exit lief de-facto nie —
+  `_NOWUP` (aus `/proc/uptime`, Float "132910.53") kippte im `case *[!0-9]*`-Gard auf 0,
+  bevor der Punkt-Abschnitt entfernt wurde; das Delta `_NOWUP−_AUTO_LAST` war dadurch immer
+  0. Der ctl klebte folglich nach jedem Runden-Ende in GAMING (die r2/r3-Beobachtung, bis
+  der v1.5.6-Lifecycle-Guard eventually Force-Daily schoss). Fix: Punkt-Abschnitt wird
+  entfernt, **bevor** der Integer-Check läuft — Exit lebt wieder.
+- **Residual-Prozess-Fix (r3-Fund)**: swipe-from-recents lässt einen cached CODM-Prozess
+  zurück (zygote-Fork, cgroup `/background`); `_auto_eval` scannt jetzt ALLE pidof-Treffer
+  auf `top-app` statt nur den ersten. Der >10 s-Exit feuert, sobald kein Treffer mehr im
+  Vordergrund sitzt — kein force-stop mehr nötig.
+- **Fork-Diet**: P6 (`pidof|awk`-Forks → pid-Argument-Reuse, nur 1 pidof-Ruf je Tick),
+  P7 (`ts` in `data.txt` aus dem `/proc/uptime`-Delta statt `date +%s` je Write),
+  P8 (settings.conf-Reload per Content-Compare statt stat-Signatur — 0 forks,
+  Punkte-Fall diszipliniert), P10 (`data.txt` als printf-Blob statt `cat<<EOF`; `mv`
+  bleibt atomar). Ziel-Budget "Controller-CPU ≪18 %" bleibt/Tendenz besser.
+- **HB-Diag**: Herzschlag-Zeile erweitert (`pid=… hit=… miss=…`) — die nächste Runde
+  beweist die Exit-Pfade sichtbar im Log.
+- Verifiziert am Gerät: Start v1.6.0, schedutil-Restore, data.txt-Format unverändert,
+  `ts`-Epoch mit Gerätkuhr synchron (nach der `/proc/uptime`-Feld-1-Korrektur).
+
 ## 2026-11-09 — v1.5.6: Daily-Restore vervollständigt (hispeed) + Lifecycle-Guard
 - **Daily-Restore (hispeed_load/hispeed_freq)**: `_apply_schedutil daily` schrieb bislang
   nur `up/down_rate_limit_us` (10000/50000) zurück — `hispeed_load`/`hispeed_freq` blieben
