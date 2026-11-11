@@ -56,8 +56,9 @@ _pick_freq() {
     echo "$best"
 }
 
-gold_at_pct() { _pick_freq "$GOLD_FREQS" $(( GOLD_MAX * $1 / 100 )); }
-gpu_at_pct()  { _pick_freq "$GPU_FREQS"  $(( GPU_MAX  * $1 / 100 )); }
+gold_at_pct()   { _pick_freq "$GOLD_FREQS"   $(( GOLD_MAX   * $1 / 100 )); }
+silver_at_pct() { _pick_freq "$SILVER_FREQS" $(( SILVER_MAX * $1 / 100 )); }
+gpu_at_pct()    { _pick_freq "$GPU_FREQS"    $(( GPU_MAX    * $1 / 100 )); }
 
 # ── thermal zones ───────────────────────────────────────────────────────────
 _cache_thermal_zones() {

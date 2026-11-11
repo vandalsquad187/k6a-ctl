@@ -46,12 +46,18 @@ _load_gov() {
                 /system/lib/modules/k6a_gov.ko /vendor/lib/modules/k6a_gov.ko; do
         [ -f "$cand" ] || continue
         seen=1
+            # v1.6.1: binaerer Fallback (strings fehlt z. B. auf manchen toybox-Builds);
+            # Muster unabgeankert — in .binaries trennen NUL-Bytes keine Zeilen
             if command -v strings >/dev/null 2>&1; then
                 kv=$(strings "$cand" 2>/dev/null | grep -E '^version=[0-9]+\.[0-9]+\.[0-9]+$' | head -1 | cut -d= -f2)
-                if [ -n "$kv" ] && ! kver_ok "$kv"; then
-                    log "WARN $cand version=$kv, erwartet 1.5.x–1.9.x / 1.10+ — überspringe"
-                    continue
-                fi
+            else
+                kv=$(grep -aoE 'version=[0-9]+\.[0-9]+\.[0-9]+' "$cand" 2>/dev/null | head -1 | cut -d= -f2)
+            fi
+            # Version-Gate gilt jetzt fuer beide Pfade (vorher: ohne strings
+            # wurde jeder Kandidat geladen und erst am Runtime-Gate rmmodded)
+            if [ -n "$kv" ] && ! kver_ok "$kv"; then
+                log "WARN $cand version=$kv, erwartet 1.5.x–1.9.x / 1.10+ — überspringe"
+                continue
             fi
         ko=$cand
         break

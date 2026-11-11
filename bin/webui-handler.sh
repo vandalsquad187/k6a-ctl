@@ -66,7 +66,7 @@ bw_set() {
     [ $# -eq 6 ] || return 1
     for a in "$@"; do
         case "$a" in ''|*[!0-9]* ) return 1 ;; esac
-        [ "$a" -ge 0 ] 2>/dev/null && [ "$a" -le 20000 ] 2>/dev/null || return 1
+        [ "$a" -ge 0 ] 2>/dev/null && [ "$a" -le 30000 ] 2>/dev/null || return 1
     done
     printf '%s' "$vals" > /sys/kernel/k6a_gov/bw_floors 2>/dev/null
 }

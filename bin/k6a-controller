@@ -303,7 +303,7 @@ _startup() {
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
         log "k6a_gov ${gv:-unbekannt} legacy=$(gov_read "legacy" 2>/dev/null | tr -d ' \n\r\t')"
         case "$gv" in
-            1.[5-9].*) ;;
+            1.[5-9].*|1.[1-9][0-9].*) ;;
             "") warn "k6a_gov status ohne version — Build 341 (1.5.0) erwartet" ;;
             *) warn "k6a_gov $gv — ab Build 341 (1.5.0): CONFIG_K6A_GOV=m als Modul plus hash_state" ;;
         esac
@@ -352,7 +352,10 @@ _apply_schedutil() { # $1=gaming|daily
         w "$P6/schedutil/up_rate_limit_us" 500
         w "$P6/schedutil/down_rate_limit_us" 20000
         w "$P0/schedutil/hispeed_load" 50
-        w "$P0/schedutil/hispeed_freq" "$(gold_at_pct 90)"
+        # v1.6.1: policy0 = Silver-Cluster — hispeed aus der SILVER-Tabelle,
+        # nicht Gold: gold_at_pct 90 (2,07 GHz) lag ueber SILVER_MAX, schedutil
+        # snapped auf Silver-Max und boostete jeden 50%-Load auf Boot-Max.
+        w "$P0/schedutil/hispeed_freq" "$(silver_at_pct 90)"
         w "$P6/schedutil/hispeed_load" 50
         w "$P6/schedutil/hispeed_freq" "$GOLD_MAX"
         [ -d "$ib" ] && {
@@ -721,8 +724,17 @@ _gov_stale_action() { # $1=grund
     sleep 1
     /system/bin/rmmod k6a_gov 2>/dev/null
     sleep 1
-    if [ -f "$MODDIR/k6a_gov.ko" ]; then
-        /system/bin/insmod "$MODDIR/k6a_gov.ko" 2>/dev/null
+    # v1.6.1: gleiche Suchreihenfolge wie service.sh — der Standard-Install-Pfad
+    # ist /data/adb/k6a_gov.ko (Kernel-Zip), nicht $MODDIR. Vorher lief die
+    # Recovery leer, enable blieb 0.
+    local _KO _cand
+    _KO=""
+    for _cand in "$MODDIR/k6a_gov.ko" /data/adb/k6a_gov.ko \
+                 /system/lib/modules/k6a_gov.ko /vendor/lib/modules/k6a_gov.ko; do
+        [ -f "$_cand" ] && { _KO="$_cand"; break; }
+    done
+    if [ -n "$_KO" ]; then
+        /system/bin/insmod "$_KO" 2>/dev/null
     fi
     sleep 1
     if gov_sysfs_exists; then
