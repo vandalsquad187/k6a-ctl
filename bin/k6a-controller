@@ -303,7 +303,7 @@ _startup() {
     _apply_cd_thresholds
     _fix_usb_autosuspend
     _turbo_recover
-    log "k6a-ctl ${_MODVER:-v1.6.2} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
+    log "k6a-ctl ${_MODVER:-v1.6.3} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)

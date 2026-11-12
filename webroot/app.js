@@ -223,6 +223,14 @@ function render() {
 setInterval(fetchData, 2000);
 fetchData();
 
+/* v1.6.3: Webui-Backoff — sichtbar alle 2 s, im Hintergrund (Tab hidden /
+ * Bildschirm aus) alle 10 s. Spart nc-Traffic und Controller-CPU im Idle. */
+var fetchTimer = setInterval(fetchData, 2000);
+document.addEventListener("visibilitychange", function(){
+    clearInterval(fetchTimer);
+    fetchTimer = setInterval(fetchData, document.hidden ? 10000 : 2000);
+});
+
 /* Cache Schliesszustand der Aufklapp-Kacheln (v1.4.4) */
 (function(){
     for (var id of ["dSetup","dStatus","dGov","dBw","dHist"]) {
