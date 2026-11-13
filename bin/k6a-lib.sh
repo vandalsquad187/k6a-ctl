@@ -25,6 +25,22 @@ dbg()  { [ "${CFG_DEBUG:-0}" = "1" ] && { _logrot; printf '[%s] [DBG] %s\n' "$(d
 
 r() { cat "$1" 2>/dev/null || echo "0"; }
 w() { printf '%s' "$2" > "$1" 2>/dev/null; }
+
+# _read_int <datei> <zielvar> [default] — erste Ganzzahl einer Datei in Zielvar
+# (0 forks: read + eval sind builtins). Bugklasse v1.5.2/v1.6.0: numerische
+# /proc-/sysfs-Leser ohne Integer-Scrub sterben in $(( )) an Garbage
+# ("132910.53", "abc", ""). Semantik wie die alten Guards: kein Vorzeichen
+# (Akkutemp negativ wurde auch vorher verworfen), leer/ohne Datei → default.
+# Achtung: POSIX-read rc=1 bei fehlendem Newline, Variable ist trotzdem
+# gesetzt — deshalb NICHT auf rc, sondern auf Nichtleere verzweigen.
+_read_int() { # $1=datei $2=zielvar [$3=default, sonst ""]
+    local _ri_v=""
+    read -r _ri_v < "$1" 2>/dev/null
+    case "$_ri_v" in *[!0-9]*) _ri_v=${_ri_v%%[!0-9]*} ;; esac
+    if [ -n "$_ri_v" ]; then eval "$2=\$_ri_v"; return 0; fi
+    eval "$2=\$3"; return 1
+}
+
 w_checked() { # $1=pfad $2=wert — schreibt, loggt Fehler, rc=1 bei Fehlschlag
     if ! printf '%s' "$2" > "$1" 2>/dev/null; then
         warn "write failed: $1=$2"

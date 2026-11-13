@@ -175,6 +175,43 @@ else
     _pass "k6a-lib.sh: read_temp ohne 40-Fallback"
 fi
 
+# ── 7/7 _read_int-Fuzz (C1-Bugklasse: Garbage in numerischen /proc-Lesern) ───
+echo "[7] _read_int-Fuzz (C1)"
+if grep -q '_read_int()' "$MOD/bin/k6a-lib.sh" 2>/dev/null; then
+    _pass "k6a-lib.sh: _read_int() definiert"
+else
+    _fail "k6a-lib.sh: _read_int() fehlt (C1)"
+fi
+_ZF=$(mktemp 2>/dev/null) || _ZF=""
+if [ -z "$_ZF" ]; then
+    _warn "kein mktemp — Fuzz-Cases übersprungen"
+else
+    _ri_run() { MODDIR="$MOD" sh -c ". '$MOD/bin/k6a-lib.sh'; _read_int '$_ZF' _RV ${3:-0}; echo \"\$_RV\""; }
+    _ri_case() { # $1=label $2=inhalt $3=erwartet
+        printf '%s' "$2" > "$_ZF"
+        _got=$(_ri_run "$2")
+        if [ "$_got" = "$3" ]; then _pass "$1: '$2' → $_got"; else _fail "$1: '$2' → '$_got' (erwartet '$3')"; fi
+    }
+    # Grundsemantik: erste Ganzzahl, Rest verfaulenzt
+    _ri_case "float"    "132910.53" "132910"
+    _ri_case "suffix"   "42x"       "42"
+    _ri_case "exp"      "1e5"       "1"
+    _ri_case "leading0" "007"       "007"
+    _ri_case "space"    " 12"       "12"
+    _ri_case "neg"      "-5"        "0"
+    _ri_case "empty"    ""          "0"
+    _ri_case "text"     "abc"       "0"
+    printf '42\n' > "$_ZF"
+    _got=$(_ri_run)
+    if [ "$_got" = "42" ]; then _pass "newline: '42\\n' → 42"; else _fail "newline: → '$_got' (erwartet 42)"; fi
+    printf '17\nabc\n' > "$_ZF"
+    _got=$(_ri_run)
+    if [ "$_got" = "17" ]; then _pass "multiline: erste Zeile → 17"; else _fail "multiline: → '$_got' (erwartet 17)"; fi
+    _got=$(MODDIR="$MOD" sh -c ". '$MOD/bin/k6a-lib.sh'; _read_int '/nonexistent/nope' _RV 7; echo \"\$_RV\"" 2>/dev/null)
+    if [ "$_got" = "7" ]; then _pass "readfail: fehlende Datei → default"; else _fail "readfail: → '$_got' (erwartet 7)"; fi
+    rm -f "$_ZF"
+fi
+
 echo "════════════════════════════════════"
 if [ "$FAIL" = "0" ]; then echo " GATE OK — $WARN warn(s)"; exit 0
 else echo " GATE FAILED — $FAIL err(s), $WARN warn(s)"; exit 1; fi

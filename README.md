@@ -11,6 +11,31 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 > der Governor per `insmod` geladen und ist ohne Kernel-Flash nachrüstbar.
 > Ältere Kernel laufen, verlieren aber die Live-Cap-/BW-Statuswerte.
 
+## 2026-11-13 — v1.6.5: C1-Fuzz-Schutz + hb-Keys im Blob + Failure-Semantics
+- **`_read_int()` (C1)**: zentrale 0-fork-Integer-Lesefunktion (read+eval,
+  keine Subshells) — schneidet auf die erste Ganzzahl, Leer-/Read-Fail →
+  default. Hintergrund: die v1.6.0-`uptime`-Bugklasse („132910.53" tötete
+  `$(( ))`) existierte weiterhin an 5 Hot-Path-Stellen (`_write_data`:
+  CPU/GPU-Takte, Akku-Capacity/Temp) und an 3 im service.sh-Watchdog. Alle
+  8 Stellen laufen jetzt über den Scrub; der Controller kann dort nicht mehr
+  sterben.
+- **Gate-Sektion `[7] _read_int-Fuzz`**: 10 Fälle (Float/`42x`/`1e5`/
+  Leerzeichen/negativ/leer/Text/Multiline/readfail/007) gegen die echte
+  Funktion — die nächste Firmware-Surprise failt das Gate statt den Tick.
+- **service.sh-uptime-Scrub**: 3 `cut`-Stellen (Init/Clean-Exit/Backoff)
+  scrubben auf 0 statt im `$(( ))` zu sterben (das hätte den Watchdog selbst
+  gekillt — der hält sonst den Controller nicht).
+- **hb-Keys in data.txt (C5)**: `hb_pid`/`hb_hit`/`hb_miss` zusätzlich zu
+  `gov_hist` — WebUI zeigt die HB-Diag unter der Hist-Tabelle statt nur
+  service.log.
+- **README: Failure-Semantics-Tabelle** — was jede Schicht bei fehlender
+  Quelle/Garbage/totem Modul macht (Kernel hold+fail-safe, ctl Scrub,
+  Watchdog-Backoff, Turbo-Notbremse).
+- Verifiziert: Gate 41/41 grün (neu: 12 Fuzz-Checks — der Float-Fall fand beim
+  ersten Lauf den POSIX-read-Bug in `_read_int` selbst, Fix voraus), Controller-Smoke
+  (Sandbox, 3 Ticks, data.txt-Keys unverändert + neue hb-Keys), Syntax-Checks
+  `sh -n` auf controller/service/check_module/lib.
+
 ## 2026-11-09 — v1.6.0: Fork-Diet-2 + r3-Items (Exit-Semantik repariert)
 - **Exit-Bug-Fund (r3-Mystery aufgelöst)**: der auto-Mode-`>10 s`-Exit lief de-facto nie —
   `_NOWUP` (aus `/proc/uptime`, Float "132910.53") kippte im `case *[!0-9]*`-Gard auf 0,
@@ -276,6 +301,20 @@ das die Lib einmalig statt still zu scheitern.
 - fehlgeschlagene Schreibzugriffe werden geloggt statt ignoriert (`w_checked`)
 - `k6a_gov.ko`: Kandidat mit passender Version wird gewählt, statt beim ersten
   vorhandenen (ggf. falschen) stehen zu bleiben
+
+### Failure-Semantics (v1.6.5)
+
+Was passiert, wenn was fehlt — je Schicht:
+
+| Fehlerfall | Kernel (k6a_gov) | Modul (k6a-ctl) |
+|---|---|---|
+| Keine Temp-Quelle (alle Sensoren weg) | State wird **gehalten**; ab Build 454 zusätzlich: 10 ungültige Ticks (2,5 s) in GAMING → CD_L2 erzwungen („sensor fail-safe"), danach Recovery automatisch | `read_temp` ohne Zone → leer („--"), kein erfundener 40 °C-Wert |
+| Sensor liefert Garbage | Kernel scrubt via `kstrtouint` (Garbage → Abbruch → wie „keine Quelle") | `read_temp` case-Guard verwirft Nicht-Ziffern |
+| `/proc`-/sysfs-Zahlen enden plötzlich mit „.53"/Text (Firmware-Wechsel) | – (Kernel liest eigene Sensoren) | `_read_int` (v1.6.5): schneidet auf erste Ganzzahl, Leer-/Read-Fail → default 0; Controller stirbt nicht in `$(( ))` |
+| `/proc/uptime` Garbage im Watchdog | – | service.sh-Scrub (v1.6.5): Wert → 0, Loop läuft weiter; Crash-Backoff 3→6→12→24→30 s, >10 Crashes in 60 s → „crash storm — gebe auf", Clean-Exit resettet |
+| Modul-Prozess tot/hängend | Kernel fährt **autark** weiter (State Machine + Enforcement brauchen kein Userspace) | service.sh-Watchdog startet mit Backoff neu |
+| Modul fehlt ganz (z. B. nach Wipe) | Kernel-Legacy-Mode gilt weiter (persistente Sysfs-Werte) | WebUI zeigt letzte data.txt-Daten (stale, `ts`-Key sagt wann) |
+| vendor.thermal-engine startet nach Turbo-Pause nicht zurück | – | `_TURBO_BLIND`: 5 Ticks (10 s) ohne Pid-Beweis → Notbremse (Pause rückgängig), Re-Arm erst < 85 °C |
 
 ---
 

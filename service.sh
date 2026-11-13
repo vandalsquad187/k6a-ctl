@@ -119,7 +119,9 @@ log "service start"
 
 # ── controller watchdog (crash-backoff) ─────────────────────────────────────
 CTRL="$MODDIR/bin/k6a-controller"
-_backoff=3; _crashes=0; _window=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)
+_backoff=3; _crashes=0
+_window=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0); case "$_window" in ''|*[!0-9]*) _window=0 ;; esac
+# v1.6.5: Garbage-uptime (Bugklasse C1) wuerde $(( )) unten toeten — Scrub.
 
 while true; do
     nice -n 0 sh "$CTRL" "$MODDIR"
@@ -127,11 +129,12 @@ while true; do
     [ -f "$MODDIR/run/stop" ] && { rm -f "$MODDIR/run/stop"; log "stop-file — ende"; break; }
     if [ "$RC" = "0" ]; then
         log "controller clean exit 0 — kein Crash"
-        _crashes=0; _backoff=3; _window=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)
+        _crashes=0; _backoff=3
+        _window=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0); case "$_window" in ''|*[!0-9]*) _window=0 ;; esac
         sleep 1
         continue
     fi
-    _now=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)
+    _now=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0); case "$_now" in ''|*[!0-9]*) _now=0 ;; esac
     if [ $(( _now - _window )) -lt 60 ]; then
         _crashes=$(( _crashes + 1 ))
         [ "$_crashes" -gt 10 ] && { log "crash storm — gebe auf"; break; }

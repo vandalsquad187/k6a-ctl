@@ -207,6 +207,15 @@ function render() {
             tr.innerHTML = '<td>' + h.time + '</td><td>' + h.temp + '</td><td>' + h.trans + '</td>';
             histBody.appendChild(tr);
         });
+        // v1.6.5: HB-Diag aus data.txt (C5) — statt nur service.log
+        var hbn = document.getElementById('hbNote');
+        if (!hbn) {
+            hbn = document.createElement('div');
+            hbn.id = 'hbNote';
+            hbn.style.cssText = 'margin-top:6px;color:#94a3b8;font-size:12px;';
+            histBody.parentNode.insertBefore(hbn, histBody.nextSibling);
+        }
+        hbn.textContent = 'HB pid=' + (d.hb_pid || '0') + ' hit=' + (d.hb_hit || '0') + ' miss=' + (d.hb_miss || '0');
     }
 
     var bg = document.getElementById('btnGaming');

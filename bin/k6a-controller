@@ -329,7 +329,7 @@ _startup() {
     _apply_cd_thresholds
     _fix_usb_autosuspend
     _turbo_recover
-    log "k6a-ctl ${_MODVER:-v1.6.4} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
+    log "k6a-ctl ${_MODVER:-v1.6.5} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -668,12 +668,12 @@ _write_data() {
     # v1.6.0/P7: epoch abgeleitet statt date-Fork je Write (_EPOCH0/_UP0 aus _startup)
     _now=$(( _EPOCH0 + _NOWUP - _UP0 ))
 
-    gn=""; read -r gn < "$P0/scaling_cur_freq" 2>/dev/null || gn=0; cs=$(( ${gn:-0} / 1000 ))
-    gn=""; read -r gn < "$P6/scaling_cur_freq" 2>/dev/null || gn=0; cg=$(( ${gn:-0} / 1000 ))
-    gn=""; read -r gn < "$GPU/devfreq/cur_freq" 2>/dev/null || gn=0; gm=$(( ${gn:-0} / 1000000 ))
-    gn=""; read -r bpc < /sys/class/power_supply/battery/capacity 2>/dev/null
-    gn=""; read -r btp < /sys/class/power_supply/battery/temp 2>/dev/null
-    btpc="$(( ${btp:-0} / 10 )).$(( ${btp:-0} % 10 ))"
+    gn=0; _read_int "$P0/scaling_cur_freq" gn 0;  cs=$(( gn / 1000 ))
+    gn=0; _read_int "$P6/scaling_cur_freq" gn 0;  cg=$(( gn / 1000 ))
+    gn=0; _read_int "$GPU/devfreq/cur_freq" gn 0; gm=$(( gn / 1000000 ))
+    bpc=0; _read_int /sys/class/power_supply/battery/capacity bpc 0
+    btp=0; _read_int /sys/class/power_supply/battery/temp btp 0
+    btpc="$(( btp / 10 )).$(( btp % 10 ))"
 
     gv=""; gs=""; gt=""; gte=""; gpf=""; ghv=""; ghs=""; gpc=""
     gbw=""; gbl=""; ghe=""; gpm=""; gas=""; gts=""; gtv=""; gbg=""
@@ -743,7 +743,10 @@ gov_temp_src=$gts
 gov_temp_valid=$gtv
 gov_batt_guard=$gbg
 gov_game_pid=$gpid
-gov_hist=${_HIST}"
+gov_hist=${_HIST}
+hb_pid=${_AUTO_PID:-0}
+hb_hit=$_AUTO_HIT
+hb_miss=$_AUTO_FG_MISS"
     printf '%s\n' "$_dpb" > "${DATA}.tmp" 2>/dev/null
     mv "${DATA}.tmp" "$DATA"
 }
