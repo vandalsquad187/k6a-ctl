@@ -292,18 +292,44 @@ _startup() {
     case "$SILCAP_G_RAW" in ''|*[!0-9]*|0) SILCAP_G=0 ;; *) SILCAP_G=$SILCAP_G_RAW; [ "$SILVER_MAX" -gt 0 ] 2>/dev/null && [ "$SILCAP_G" -gt "$SILVER_MAX" ] && SILCAP_G=$SILVER_MAX ;; esac
     case "$GPUCAP_G_RAW" in ''|*[!0-9]*|0) GPUCAP_G=0 ;; *) GPUCAP_G=$GPUCAP_G_RAW; [ "$GPU_MAX" -gt 0 ] 2>/dev/null && [ "$GPUCAP_G" -gt "$GPU_MAX" ] && GPUCAP_G=$GPU_MAX ;; esac
     _ensure_gov
-    # v1.6.2: Kernel-hist aus dem eigenen Node seeden (Kernel Build450 hat hist
+    # v1.6.4: Kernel-hist aus dem eigenen Node seeden (Kernel Build450 hat hist
     # aus status ausgelagert). Alter Kernel (hist= noch in status) wird vom
     # per-Tick-Seed in _parse_status abgedeckt — doppelt abgesichert.
     # r() antwortet "0" bei Fehler -> Roh-cat + Guard statt Seed-Vergiftung.
+    # v1.6.4: Rows ms->Epoch konvertieren — Kernel-ts = ms-since-boot
+    # (ktime_get = CLOCK_MONOTONIC, suspend-EXKLUSIV). /proc/timer_list
+    # "now at <ns> nsecs" liefert exakt dieselbe Domain -> epoch =
+    # now + (ts_ms - mono_ms)/1000 ist suspend-sicher exakt (/proc/uptime
+    # ist boottime-inklusive-suspend und wuerde um die Suspend-Zeit schief
+    # laufen). Ohne timer_list bleiben Rows ms (Status quo, graceful).
+    _K6A_MONO_MS=""
+    _mono_ns=$(awk '/^now at/ {print $3}' /proc/timer_list 2>/dev/null)
+    case "$_mono_ns" in *[!0-9]*|"") _mono_ns="" ;; esac
+    [ -n "$_mono_ns" ] && _K6A_MONO_MS=$((_mono_ns / 1000000))
+    _hist_ms_to_epoch() {
+        local _e _ts _out=""
+        _now=$(date +%s)
+        for _e in $(printf '%s' "$1" | tr ',' ' '); do
+            _ts=${_e%%:*}
+            case "$_ts" in *[!0-9]*|"") _out="$_out$_e,"; continue ;; esac
+            if [ -n "$_K6A_MONO_MS" ]; then
+                _out="$_out$((_now + (_ts - _K6A_MONO_MS) / 1000)):${_e#*:},"
+            else
+                _out="$_out$_e,"
+            fi
+        done
+        printf '%s' "${_out%,}"
+    }
     _HIST=$(cat "$GOV/hist" 2>/dev/null)
-    case "$_HIST" in ""|0) _HIST="" ;; esac
+    case "$_HIST" in ""|0) _HIST="" ;;
+        *) _HIST=$(_hist_ms_to_epoch "$_HIST") ;;
+    esac
     # Schwellwerte neu anwenden — sie existieren nur im Sysfs und gehen bei
     # Reboot/Modul-Neustart sonst verloren (2× passiert, F16)
     _apply_cd_thresholds
     _fix_usb_autosuspend
     _turbo_recover
-    log "k6a-ctl ${_MODVER:-v1.6.3} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
+    log "k6a-ctl ${_MODVER:-v1.6.4} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -664,7 +690,9 @@ _write_data() {
         [ -r "$GOV/battery_guard" ]      && { gn=""; read -r gbg  < "$GOV/battery_guard" 2>/dev/null; }
         [ -r "$GOV/game_pid" ]           && { gn=""; read -r gpid < "$GOV/game_pid" 2>/dev/null; }
         if [ "$_HIST" = "" ] && [ -n "$_SHIST" ]; then
-            _HIST=$_SHIST
+            # v1.6.4: alter-Kernel-Fallback — _SHIST-Rows (ms) ebenfalls
+            # konvertieren (einmal pro Session, _K6A_MONO_MS ist gecacht)
+            _HIST=$(_hist_ms_to_epoch "$_SHIST")
         elif [ -n "$_SSTATE" ] && [ "$_SSTATE" != "$_lsf_state" ]; then
             # v1.6.2: eigener erster Eintrag auch OHNE Kernel-Seed (Build450:
             # hist aus status ausgelagert -> _SHIST bleibt leer); alter
