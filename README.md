@@ -11,6 +11,22 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 > der Governor per `insmod` geladen und ist ohne Kernel-Flash nachrüstbar.
 > Ältere Kernel laufen, verlieren aber die Live-Cap-/BW-Statuswerte.
 
+## 2026-11-14 — v1.6.6: gpu_caps/poll_adaptive-Persistenz (D1-Arming rebootfest)
+- **Fund (r14)**: die k6a_gov-Nodes `gpu_caps` (L2/L3/L4-CD-Hz) und `poll_adaptive`
+  überleben keinen Reboot — Kernel-Defaults (800/565/430 bzw. adaptive=1) stehen
+  nach jedem Boot wieder drin; die r12/r13/r14-Arming-Werte (800/680/500 + 0)
+  mussten bisher JEDEs Mal manuell per sysfs gesetzt werden. Bis v1.6.5 las das
+  Modul gpu_caps nur für die Telemetrie (:688), schrieb nie.
+- **Fix**: settings.conf-Schlüssel `gpu_caps` (genau 3 Hz-Werte, Validierung wie
+  cd_thresholds) und `poll_adaptive` (0/1) + `_apply_gov_caps()` beim
+  Controller-Start (gleiche idempotente Schreiblogik wie `_apply_cd_thresholds`
+  — Boot/RMMod-Recovery/Watchdog-Respawn deckt die Stelle ab; nur schreiben,
+  wenn sysfs abweicht; alte Kernel ohne Node failen still). Start-Log-Zeile
+  zeigt beide Werte. rmmod-Recovery braucht keinen service.sh-Hook mehr.
+- **Verifiziert**: Gate grün, Controller-Restart am Gerät — Start-Log zeigt
+  `gpu_caps=800000000 680000000 500000000 poll_adaptive=0`, Sysfs-Readback
+  identisch; idempotent (zweiter Start ohne Rewrite-Log).
+
 ## 2026-11-13 — v1.6.5: C1-Fuzz-Schutz + hb-Keys im Blob + Failure-Semantics
 - **`_read_int()` (C1)**: zentrale 0-fork-Integer-Lesefunktion (read+eval,
   keine Subshells) — schneidet auf die erste Ganzzahl, Leer-/Read-Fail →

@@ -76,6 +76,7 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
     MODE=""; THP=""; PKG=""; DELEGATED=""; PROFILE=""
     AUTO_BT=""; AUTO_HYST=""; BATT_T=""; BATT_GUARD=""; CFG_DEBUG=""
     CAP_G=""; CAP_D=""; CDT=""
+    GPUCAPS=""; POLL_ADAPT=""
     TURBO_STOP=""; TURBO_SPOOF=""
     local _line _kk _vv
     if [ -f "$CONFIG" ]; then
@@ -97,6 +98,8 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
                 silver_cap_gaming) SILCAP_G_RAW=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
                 gpu_cap_gaming) GPUCAP_G_RAW=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
                 cd_thresholds) CDT=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
+                gpu_caps) GPUCAPS=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
+                poll_adaptive) POLL_ADAPT=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
                 turbo_stop_daemons) TURBO_STOP=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
                 turbo_spoof_temp) TURBO_SPOOF=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
                 debug) CFG_DEBUG=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
@@ -130,6 +133,12 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
         ''|*[!0-9\ ]*) CDT="" ;;
         *) set -- $CDT; [ $# -eq 7 ] || CDT="" ;;
     esac
+    # v1.6.6: Kernel-GPU-Caps genau 3 Zahlen (L2/L3/L4 Hz), poll_adaptive 0/1
+    case "$GPUCAPS" in
+        ''|*[!0-9\ ]*) GPUCAPS="" ;;
+        *) set -- $GPUCAPS; [ $# -eq 3 ] || GPUCAPS="" ;;
+    esac
+    case "$POLL_ADAPT" in 0|1) ;; *) POLL_ADAPT="" ;; esac
     return 0
 }
 
@@ -327,9 +336,10 @@ _startup() {
     # Schwellwerte neu anwenden — sie existieren nur im Sysfs und gehen bei
     # Reboot/Modul-Neustart sonst verloren (2× passiert, F16)
     _apply_cd_thresholds
+    _apply_gov_caps
     _fix_usb_autosuspend
     _turbo_recover
-    log "k6a-ctl ${_MODVER:-v1.6.5} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
+    log "k6a-ctl ${_MODVER:-v1.6.5} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} gpu_caps=${GPUCAPS:-kernel-default} poll_adaptive=${POLL_ADAPT:-kernel-default} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -494,6 +504,26 @@ _apply_cd_thresholds() {
     gov_write "profile" "$(profile_to_idx "$PROFILE")" 2>/dev/null
     gov_write "cd_thresholds" "$CDT" || return 0
     log "cd_thresholds ← $CDT"
+}
+
+# ── v1.6.6: Kernel-GPU-Caps + Adaptive-Slow-Poll aus settings.conf ───────────
+# Beide Sysfs-Nodes sind flüchtig: Reboot/Modul-Neustart setzt sie auf die
+# Kernel-Defaults (gpu 800/565/430, adaptive=1) zurück — wie cd_thresholds
+# vor v1.4.9 (F16). Gleiche idempotente Schreiblogik (nur schreiben, wenn sysfs
+# abweicht), gleiche Fehlertoleranz (alte Kernel ohne Node: write failt still).
+_apply_gov_caps() {
+    gov_sysfs_exists || return 0
+    local cur
+    if [ -n "$GPUCAPS" ]; then
+        cur=$(r "$GOV/gpu_caps" 2>/dev/null | tr '\n' ' ' | tr -s ' ' | sed 's/^ //;s/ $//')
+        if [ "$cur" != "$GPUCAPS" ]; then
+            gov_write "gpu_caps" "$GPUCAPS" && log "gpu_caps ← $GPUCAPS"
+        fi
+    fi
+    if [ -n "$POLL_ADAPT" ]; then
+        cur=$(r "$GOV/poll_adaptive" 2>/dev/null)
+        [ "$cur" = "$POLL_ADAPT" ] || gov_write "poll_adaptive" "$POLL_ADAPT"
+    fi
 }
 
 # ── v1.5.0 turbo: Thermal-Brake-Controller ───────────────────────────────────
