@@ -195,7 +195,7 @@ _cfg_maybe_load() {
 # zählt, sobald EINER top-app sitzt; _AUTO_FG_MISS zählt Ticks ohne jeden
 # top-app-Treffer (Diagnostik, HB-Zeile).
 _auto_eval() {
-    local pidset pid topapp=0 _l1 _l2 _l3 _l4 _l5 _l6 _l7 _l8 _l9 _l10 _l11 _l12 _l13 _cgv
+    local pidset pid topapp=0 _cgv
     pidset=$(pidof "$PKG" 2>/dev/null) || pidset=""
     pid=${pidset%% *}
     _AUTO_PID="${pid:-0}"
@@ -205,12 +205,15 @@ _auto_eval() {
     fi
     topapp=0
     for pid in $pidset; do
-        _l1=""; _l2=""; _l3=""; _l4=""; _l5=""; _l6=""; _l7=""; _l8=""; _l9=""; _l10=""; _l11=""; _l12=""; _l13=""
-        { read _l1; read _l2; read _l3; read _l4; read _l5; read _l6; read _l7; read _l8; read _l9; read _l10; read _l11; read _l12; read _l13; } < "/proc/$pid/cgroup" 2>/dev/null
-        _cgv="$_l1 $_l2 $_l3 $_l4 $_l5 $_l6 $_l7 $_l8 $_l9 $_l10 $_l11 $_l12 $_l13"
-        case "$_cgv" in
-            *top-app*) topapp=1; break ;;
-        esac
+        # v1.6.7: While-Loop statt 13 fixer reads — cgroup-Files mit >13
+        # Zeilen (Deeper-Container/Nesting) liessen den Vordergrund-Hit
+        # unten durchfallen. HB (hit/miss) beweist den Pfad.
+        while IFS= read -r _cgv; do
+            case "$_cgv" in
+                *top-app*) topapp=1; break ;;
+            esac
+        done < "/proc/$pid/cgroup" 2>/dev/null
+        [ "$topapp" = "1" ] && break
     done
     if [ "$topapp" = "1" ]; then
         _AUTO_HIT=$((_AUTO_HIT + 1)); _AUTO_FG_MISS=0
@@ -539,6 +542,7 @@ _apply_gov_caps() {
  _TURBO_ZONES="/sys/devices/virtual/thermal/thermal_zone26/temp /sys/devices/virtual/thermal/thermal_zone18/temp"
 _TURBO_ACTIVE=0
 _TURBO_LOCK=0        # 1 = Notbremse hat ausgeloest: kein Turbo, bis real abgekuehlt
+_TURBO_VERIFY=0      # v1.6.7: Ticks bis zur Daemon-Stop-Verifikation (0 = inaktiv)
 _TURBO_BLIND=0       # Ticks ohne reale Kerntemperatur im status
 # absolute Pfade — Mount-Binaries nicht von $PATH abhängig machen (su/ksu-Shells
 # haben je nach Context verschiedene PATHs)
@@ -564,6 +568,7 @@ _turbo_on() {
         setprop ctl.stop vendor.thermal-engine 2>/dev/null
         setprop ctl.stop mi_thermald 2>/dev/null
         log "turbo: thermal-daemons pausiert (engine+mi_thermald)"
+        _TURBO_VERIFY=3   # v1.6.7: Stop-Verifikation 3 Ticks spaeter
     fi
     # Presence-Check per MOUNTPOINT (Source-Spalte zeigt für file-bind-mounts
     # /dev/block/dm-XX, NICHT den Dateinamen — "grep faketemp" findet nix)
@@ -598,6 +603,29 @@ _turbo_off() {
     setprop ctl.start mi_thermald 2>/dev/null
     log "turbo: oem-brake wiederhergestellt (mounts aus, daemons on)"
     _TURBO_ACTIVE=0
+}
+
+# v1.6.7: Daemon-Stop-Verifikation — 3 Ticks (SLEEP=2 ≈ 6 s) nach dem Stop
+# pruefen, ob vendor.thermal-engine/mi_thermald wirklich tot sind. Bei einem
+# respawnenden Daemon (init-Policy-Aenderung, Update-Restart) weiss man sonst
+# nicht, ob der Arm wirkt.
+_turbo_verify_tick() {
+    [ "${_TURBO_VERIFY:-0}" -gt 0 ] || return 0
+    if [ "$_TURBO_ACTIVE" != "1" ]; then
+        _TURBO_VERIFY=0   # Turbo inzwischen aus (Notbremse/Exit) — Verifikation hinfällig
+        return 0
+    fi
+    _TURBO_VERIFY=$(( _TURBO_VERIFY - 1 ))
+    [ "$_TURBO_VERIFY" -gt 0 ] && return 0
+    _TURBO_VERIFY=0
+    local _alive=""
+    pidof vendor.thermal-engine >/dev/null 2>&1 && _alive="$_alive vendor.thermal-engine"
+    pidof mi_thermald >/dev/null 2>&1 && _alive="$_alive mi_thermald"
+    if [ -n "$_alive" ]; then
+        log "turbo: WARN Daemon-Stop wirkungslos (lebt:$_alive) — Respawn/Policy?"
+    else
+        log "turbo: Stop verifiziert (beide Daemons tot, kein Respawn)"
+    fi
 }
 
 # ── v1.5.5: Turbo-Notbremse ─────────────────────────────────────────────────
@@ -671,7 +699,10 @@ _enter_daily() {
         log "-> DAILY (legacy, gold_cap=${CAP_D:-off}, silver_cap=default, gpu_cap=default)"
     fi
     _turbo_off
-    _TURBO_LOCK=0
+    # v1.6.7: _TURBO_LOCK hier NICHT ruecksetzen — die Notbremse-Sperre loest
+    # ausschliesslich _turbo_guard (gold < TURBO_REARM_C und batt < MAX_BATT-3).
+    # Sonst darf Turbo bei heissem Geraet beim naechsten Gaming-Entry sofort
+    # wieder scharf werden, bis die Notbremse erneut tritt.
 }
 
 _enter_gaming() {
@@ -869,6 +900,7 @@ while true; do
     _NOWUP=""; read -r _NOWUP _ < /proc/uptime 2>/dev/null; _NOWUP=${_NOWUP:-0}; _NOWUP=${_NOWUP%.*}; case "$_NOWUP" in *[!0-9]*) _NOWUP=0 ;; esac
     _parse_status
     _turbo_guard
+    _turbo_verify_tick
     _gov_stale_check
 
     if [ "$MODE" = "gaming" ]; then

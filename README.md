@@ -790,5 +790,5 @@ Enforcement-Pfad). v1.4.3 bindet ihn mit echter Semantik:
 - **"Thermal-Schutz"** pausiert/aktiviert alle drei Deckel in einem Zug.
 
 Live-Verhalten: `cfg_load` läuft pro Tick und `_apply_caps_gaming` ist
-idempotent — Reaktionszeit bei mode=gaming ≈ 1 s; beim Wechsel Daily→
+idempotent — Reaktionszeit bei mode=gaming ≈ 2 s (SLEEP=2 seit v1.5.2); beim Wechsel Daily→
 wird eh auf Boot-Max restauriert.
