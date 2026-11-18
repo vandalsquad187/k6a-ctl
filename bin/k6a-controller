@@ -609,6 +609,31 @@ _turbo_off() {
 # pruefen, ob vendor.thermal-engine/mi_thermald wirklich tot sind. Bei einem
 # respawnenden Daemon (init-Policy-Aenderung, Update-Restart) weiss man sonst
 # nicht, ob der Arm wirkt.
+# v1.6.8: pidof sieht diese Daemons auf dem Geraet NICHT (AGENTS-Falle) — der
+#   alte Check loggte deshalb IMMER "tot", auch bei lebendem Respawn (falscher
+#   Verifikations-Beweis). Jetzt eigener /proc-Scan, Tri-State:
+#     0=lebt, 1=tot, 2=unbekannt (/proc gar nicht lesbar — kein Fake-Beweis).
+#   Self-Match-Falle: das Muster laeuft NUR in der Shell-Variablen und wird
+#   per case-Builtin (0 Forks) geprueft — nie in argv eines Kindprozesses
+#   (grep/tr/echo), sonst matcht der Scan sich selbst und meldet Dauer-"lebt".
+#   $$-Exclusion belt+braces; Scan laeuft EINMAL pro Turbo-Stop (Countdown),
+#   nicht pro Tick — die n-tr-forks pro Pid sind vertretbar.
+_daemon_scan() { # $1=Muster, $2=Proc-Root (default /proc; $2 = Test-Hook)
+    local _pat="$1" _root="${2:-/proc}" _d _c _read=0
+    for _d in "$_root"/[0-9]*; do
+        [ -d "$_d" ] || continue              # Glob ungematcht -> literal mit "["
+        [ "${_d##*/}" = "$$" ] && continue    # eigener Prozess (Script-Invocation)
+        [ -r "$_d/cmdline" ] || continue
+        _c=$(tr '\0' ' ' < "$_d/cmdline" 2>/dev/null) || continue
+        _read=1
+        case "$_c" in
+            *"$_pat"*) return 0 ;;
+        esac
+    done
+    [ "$_read" = "1" ] && return 1
+    return 2
+}
+
 _turbo_verify_tick() {
     [ "${_TURBO_VERIFY:-0}" -gt 0 ] || return 0
     if [ "$_TURBO_ACTIVE" != "1" ]; then
@@ -618,11 +643,17 @@ _turbo_verify_tick() {
     _TURBO_VERIFY=$(( _TURBO_VERIFY - 1 ))
     [ "$_TURBO_VERIFY" -gt 0 ] && return 0
     _TURBO_VERIFY=0
-    local _alive=""
-    pidof vendor.thermal-engine >/dev/null 2>&1 && _alive="$_alive vendor.thermal-engine"
-    pidof mi_thermald >/dev/null 2>&1 && _alive="$_alive mi_thermald"
+    local _alive="" _unknown="" _r
+    _daemon_scan vendor.thermal-engine; _r=$?
+    [ "$_r" = "0" ] && _alive="$_alive vendor.thermal-engine"
+    [ "$_r" = "2" ] && _unknown="$_unknown vendor.thermal-engine"
+    _daemon_scan mi_thermald; _r=$?
+    [ "$_r" = "0" ] && _alive="$_alive mi_thermald"
+    [ "$_r" = "2" ] && _unknown="$_unknown mi_thermald"
     if [ -n "$_alive" ]; then
         log "turbo: WARN Daemon-Stop wirkungslos (lebt:$_alive) — Respawn/Policy?"
+    elif [ -n "$_unknown" ]; then
+        log "turbo: Daemon-Stop NICHT verifizierbar (/proc unlesbar:$_unknown)"
     else
         log "turbo: Stop verifiziert (beide Daemons tot, kein Respawn)"
     fi
