@@ -11,7 +11,7 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 > der Governor per `insmod` geladen und ist ohne Kernel-Flash nachrüstbar.
 > Ältere Kernel laufen, verlieren aber die Live-Cap-/BW-Statuswerte.
 
-> 📜 Vollständige Versionshistorie (v1.4.1 → v1.6.8): [`CHANGELOG.md`](CHANGELOG.md)
+> 📜 Vollständige Versionshistorie (v1.4.1 → v1.6.8): [`CHANGELOG.md`](CHANGELOG.md) (im Repo, nicht im Modul-ZIP)
 ---
 
 ## Features
