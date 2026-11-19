@@ -15,6 +15,7 @@ find "$SRC" -type f \
     ! -path '*/.git/*' ! -path '*/run/*' \
     ! -path '*/config/service.log' ! -path '*/webroot/data.txt' ! -path '*/config/*.log' \
     ! -name '*.swp' ! -name '*~' ! -name 'check_module.sh' ! -name 'build.sh' \
+    ! -name 'CHANGELOG.md' \
     | sed "s|^$SRC/||" | sort | (cd "$SRC" && zip -q -FS "$OUT" -@)
 cp -f "$OUT" "$OUT_GENERIC" 2>/dev/null || true
 
