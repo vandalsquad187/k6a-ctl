@@ -98,6 +98,38 @@ if [ -f "$CONF" ]; then
             elif [ "$5" -lt "$6" ] 2>/dev/null || [ "$6" -lt "$7" ] 2>/dev/null; then _fail "cd_thresholds: Gold-Grenzen nicht absteigend"
             else _pass "cd_thresholds $CDT" ; fi
         fi
+        # cd_ladder: 0/1 (v1.6.8, k6a_gov ab Build 461 — Feinleiter)
+        CDL=$(grep "^cd_ladder=" "$CONF" | cut -d= -f2 | tr -d ' \r')
+        case "$CDL" in
+            '') _fail "cd_ladder fehlt" ;;
+            0|1) _pass "cd_ladder=$CDL" ;;
+            *) _fail "cd_ladder ungültig: [$CDL]" ;;
+        esac
+        # cd_silver_caps: genau 3 Zahlen + Kernel-Store-Validierung gespiegelt
+        # (≤2e9, all-or-none-0, nicht aufsteigend l2≥l3≥l4 — k6a_gov.c:2086)
+        SCS=$(grep "^cd_silver_caps=" "$CONF" | cut -d= -f2- | tr -d '\r')
+        case "$SCS" in
+            '') _fail "cd_silver_caps fehlt" ;;
+            *[!0-9\ ]*) _fail "cd_silver_caps: nicht nur Zahlen [$SCS]" ;;
+            *)
+                _n=$(printf '%s' "$SCS" | wc -w 2>/dev/null)
+                if [ "${_n:-0}" -ne 3 ] 2>/dev/null; then
+                    _fail "cd_silver_caps: erwartet 3 Werte, hat $_n"
+                else
+                    set -- $SCS
+                    if [ "$1" -gt 2000000000 ] || [ "$2" -gt 2000000000 ] || [ "$3" -gt 2000000000 ]; then
+                        _fail "cd_silver_caps: Wert > 2e9 [$SCS]"
+                    elif { [ "$1" -ne 0 ] || [ "$2" -ne 0 ] || [ "$3" -ne 0 ]; } && \
+                         { [ "$1" -eq 0 ] || [ "$2" -eq 0 ] || [ "$3" -eq 0 ]; }; then
+                        _fail "cd_silver_caps: partial-zero verboten [$SCS]"
+                    elif [ "$1" -lt "$2" ] || [ "$2" -lt "$3" ]; then
+                        _fail "cd_silver_caps: aufsteigend verboten, l2≥l3≥l4 [$SCS]"
+                    else
+                        _pass "cd_silver_caps $SCS"
+                    fi
+                fi
+                ;;
+        esac
     else
         # Legacy: thresholds in settings.conf
         L2=$(grep "^cd_l2_temp=" "$CONF" | cut -d= -f2); L3=$(grep "^cd_l3_temp=" "$CONF" | cut -d= -f2)

@@ -77,6 +77,7 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
     AUTO_BT=""; AUTO_HYST=""; BATT_T=""; BATT_GUARD=""; CFG_DEBUG=""
     CAP_G=""; CAP_D=""; CDT=""
     GPUCAPS=""; POLL_ADAPT=""
+    CD_LADDER=""; SILCAPS=""
     TURBO_STOP=""; TURBO_SPOOF=""
     local _line _kk _vv
     if [ -f "$CONFIG" ]; then
@@ -100,6 +101,8 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
                 cd_thresholds) CDT=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
                 gpu_caps) GPUCAPS=$(printf '%s' "$_vv" | tr -d '\r\n') ;;
                 poll_adaptive) POLL_ADAPT=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+                cd_ladder) CD_LADDER=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
+                cd_silver_caps) SILCAPS=$(printf '%s' "$_vv" | tr -d '\r\n' | tr '\t' ' ' | tr -s ' ' | sed 's/^ //;s/ $//') ;;
                 turbo_stop_daemons) TURBO_STOP=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
                 turbo_spoof_temp) TURBO_SPOOF=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
                 debug) CFG_DEBUG=$(printf '%s' "$_vv" | tr -d ' \t\r\n') ;;
@@ -139,6 +142,13 @@ cfg_load() { # 1x settings.conf einlesen statt 10x (F11)
         *) set -- $GPUCAPS; [ $# -eq 3 ] || GPUCAPS="" ;;
     esac
     case "$POLL_ADAPT" in 0|1) ;; *) POLL_ADAPT="" ;; esac
+    # v1.6.8: Feinleiter 0/1, Silver-Caps genau 3 Zahlen (L2/L3/L4 Hz),
+    # sonst ignorieren — Kernel-Defaults (cd_ladder=1, silver 0 0 0) bleiben
+    case "$CD_LADDER" in 0|1) ;; *) CD_LADDER="" ;; esac
+    case "$SILCAPS" in
+        ''|*[!0-9\ ]*) SILCAPS="" ;;
+        *) set -- $SILCAPS; [ $# -eq 3 ] || SILCAPS="" ;;
+    esac
     return 0
 }
 
@@ -342,7 +352,7 @@ _startup() {
     _apply_gov_caps
     _fix_usb_autosuspend
     _turbo_recover
-    log "k6a-ctl ${_MODVER:-v1.6.5} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} gpu_caps=${GPUCAPS:-kernel-default} poll_adaptive=${POLL_ADAPT:-kernel-default} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
+    log "k6a-ctl ${_MODVER:-v1.6.8} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} gpu_caps=${GPUCAPS:-kernel-default} poll_adaptive=${POLL_ADAPT:-kernel-default} cd_ladder=${CD_LADDER:-kernel-default} silver_caps=${SILCAPS:-kernel-default} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -526,6 +536,23 @@ _apply_gov_caps() {
     if [ -n "$POLL_ADAPT" ]; then
         cur=$(r "$GOV/poll_adaptive" 2>/dev/null)
         [ "$cur" = "$POLL_ADAPT" ] || gov_write "poll_adaptive" "$POLL_ADAPT"
+    fi
+    # v1.6.8: Feinleiter + Silver-Caps — Sysfs-flüchtig wie gpu_caps (Reboot →
+    # Kernel-Defaults cd_ladder=1 / silver 0 0 0). Gleiche idempotente Schreib-
+    # logik, alte Kernel ohne Node: Write failt still (gov_write → w), log nur
+    # bei Erfolg. Profile clobbern beide NICHT (apply_profile_locked deckelt nur
+    # thresholds/gold/gpu/bw) — Startup-Re-Apply wie bei gpu_caps ausreichend.
+    if [ -n "$CD_LADDER" ]; then
+        cur=$(r "$GOV/cd_ladder" 2>/dev/null)
+        if [ "$cur" != "$CD_LADDER" ]; then
+            gov_write "cd_ladder" "$CD_LADDER" && log "cd_ladder ← $CD_LADDER"
+        fi
+    fi
+    if [ -n "$SILCAPS" ]; then
+        cur=$(r "$GOV/cd_silver_caps" 2>/dev/null | tr '\n' ' ' | tr -s ' ' | sed 's/^ //;s/ $//')
+        if [ "$cur" != "$SILCAPS" ]; then
+            gov_write "cd_silver_caps" "$SILCAPS" && log "cd_silver_caps ← $SILCAPS"
+        fi
     fi
 }
 

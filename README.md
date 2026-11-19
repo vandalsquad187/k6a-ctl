@@ -11,6 +11,29 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
 > der Governor per `insmod` geladen und ist ohne Kernel-Flash nachrüstbar.
 > Ältere Kernel laufen, verlieren aber die Live-Cap-/BW-Statuswerte.
 
+## 2026-11-19 — v1.6.8: Daemon-Stop-Verifikation repariert + Feinleiter/Silver-Persistenz
+- **Fix (Review-Punkt 2)**: `_turbo_verify_tick` nutzte `pidof vendor.thermal-engine`
+  / `pidof mi_thermald` — **pidof sieht diese Daemons auf dem Gerät nicht** (AGENTS-Falle,
+  derselbe Grund, aus dem der Controller selbst nie via pidof gefunden wird). Der v1.6.7-Check
+  loggte deshalb immer `Stop verifiziert (beide Daemons tot)`, **auch bei lebendem Respawn** —
+  ein falscher Verifikations-Beweis. Neu: eigener `/proc/[0-9]*/cmdline`-Scan
+  (`_daemon_scan`, `tr '\0' ' '` + `case`-Match, 0 Forks im Match) mit **Tri-State**:
+  `lebt` → WARN, `tot` → verifiziert, `unbekannt` (/proc unlesbar) → eigene Log-Zeile statt
+  Fake-Beweis. Self-Match-Falle gelöst: das Muster läuft nur in der Shell-Variablen, nie in
+  argv eines Kindprozesses (sonst matcht der Scan sich selbst → Dauer-„lebt"); `$$`-Exclusion
+  belt+braces. Scan feuert einmal pro Turbo-Stop (3-Tick-Countdown), nicht pro Tick.
+- **Persistenz (Review-Punkt 3)**: settings.conf-Schlüssel **`cd_ladder`** (0/1, Build461-
+  Default = Feinleiter an; 0 = flaches Build459-Verhalten) und **`cd_silver_caps`** (3 Hz
+  L2/L3/L4, `0 0 0` = aus) — beide Nodes sind Sysfs-flüchtig (Reboot → Kernel-Defaults),
+  das Modul re-appliziert sie idempotent beim Controller-Start, genau wie `gpu_caps`/`cd_thresholds`.
+  cfg_load validiert (0/1 bzw. genau 3 Zahlen, sonst Kernel-Default antasten), Start-Banner
+  zeigt beide Werte, Gate `[5]` prüft beide Keys gegen die Kernel-Store-Validierung
+  (≤2e9, all-or-none-0, l2≥l3≥l4). Alte Kernel ohne Node: Write failt still.
+- **Banner-Fallback** `${_MODVER:-v1.6.5}` → v1.6.8 (Stand-Drift vom c0b8a81-Muster).
+- **module.prop**: 1.6.8 / versionCode 178.
+- Verifiziert: `sh -n` grün, Gate OK 0 warns, Dekoy-Test 18/18 (lebt/tot/Kreuz-Check/
+  unbekannt/Countdown/Integration inkl. Self-Match-Nachweis).
+
 ## 2026-11-14 — v1.6.6: gpu_caps/poll_adaptive-Persistenz (D1-Arming rebootfest)
 - **Fund (r14)**: die k6a_gov-Nodes `gpu_caps` (L2/L3/L4-CD-Hz) und `poll_adaptive`
   überleben keinen Reboot — Kernel-Defaults (800/565/430 bzw. adaptive=1) stehen
