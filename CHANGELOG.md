@@ -3,6 +3,33 @@
 > Ausgelagert aus `README.md` beim Docs-Umbau 2026-11-19. Neueste Eintraege zuerst.
 > Inhalt unverändert.
 
+## 2026-11-20 — v1.6.9: P1+P2 Review-Fixes (Sicherheit/Bugs/Robustheit/Doku)
+Externe 18-Punkte-Review, verifiziert und als P1+P2 umgesetzt (kein Kernel-Flash):
+- **P1/1** `webroot/app.js`: tote Root-Bridge `ksuExec` entfernt (0 Aufrufe);
+  Hist-Zeilen nur noch `createElement`/`textContent` statt `innerHTML` (XSS-Sink).
+- **P1/2** WebUI-Einzelintervall: zweites bare `setInterval(fetchData,2000)`
+  raus (Backoff war wirkungslos); BW-Inputs bekommen `activeElement`-Guard
+  (Tippen wird nicht mehr alle 2 s überschrieben).
+- **P1/3** `service.sh` Port-Check nur noch lokale Spalte (`awk '$2 ~ /:223F$/'`)
+  — vorher matchte `:223F ` auch Remote und meldete fälschlich „belegt".
+- **P1/4** `webui-handler.sh`: `setcfg`/`_setcfg_locked` liefern rc; alle 9
+  Caller `if setcfg …; then ok; else bad` — Fehler sind nicht mehr immer HTTP 200.
+- **P1/5** Single-Instance-Match `*k6a-ctl*` → `*k6a-controller*` (False Positive
+  u. a. bei `tail -f …/k6a-ctl/…` → RC≠0 → Crash-Zählung).
+- **P1/6** `build.sh`: `webui.token`, `*.tmp.*`, `*.lock` ausgeschlossen.
+- **P2/7** Crash-Storm: kein `break` mehr — Watchdog bleibt am Leben
+  (Backoff capped 30 s), statt bis Reboot tot zu sein.
+- **P2/8** `k6a-lib.sh`: kein `thermal_zone0`-Fallback für Gold (ist pm6150-tz);
+  Caps (`cpu_apply`/`gpu_limits`/Gold-/Silver-Cap) via `w_checked`.
+- **P2/9** **#11 Wahrheit `72 80 87 66 …`** — settings.conf-Kommentar, README-Default
+  und module.prop auf den R2-validierten Shipped-Wert angleichen (Kernel-Default
+  96/99/102/93 nur als Fußnote ohne Key).
+- **P2/10** README-Drift: taskset/fps/IRQ-Rows korrigiert, Legacy-CD-State-Machine-
+  Claims auf DAILY/GAMING-Realität, `w_checked`-Satz präzisiert.
+- **P2/11** `check_module.sh` Legacy-Zweig (`delegated=0`) validiert jetzt
+  `cd_thresholds` (7 Zahlen) statt toter `cd_l2_temp=`-Keys mit Default-Vakuum.
+- module.prop 1.6.9 / versionCode 179. Tags: v1.6.7–v1.6.9 nachgezogen.
+
 ## 2026-11-19 — v1.6.8: Daemon-Stop-Verifikation repariert + Feinleiter/Silver-Persistenz
 - **Fix (Review-Punkt 2)**: `_turbo_verify_tick` nutzte `pidof vendor.thermal-engine`
   / `pidof mi_thermald` — **pidof sieht diese Daemons auf dem Gerät nicht** (AGENTS-Falle,

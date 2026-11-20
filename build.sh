@@ -14,6 +14,7 @@ rm -f "$OUT" "$OUT_GENERIC"
 find "$SRC" -type f \
     ! -path '*/.git/*' ! -path '*/run/*' \
     ! -path '*/config/service.log' ! -path '*/webroot/data.txt' ! -path '*/config/*.log' \
+    ! -name 'webui.token' ! -name '*.tmp.*' ! -name '*.lock' \
     ! -name '*.swp' ! -name '*~' ! -name 'check_module.sh' ! -name 'build.sh' \
     ! -name 'CHANGELOG.md' \
     | sed "s|^$SRC/||" | sort | (cd "$SRC" && zip -q -FS "$OUT" -@)

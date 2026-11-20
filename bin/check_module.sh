@@ -131,13 +131,24 @@ if [ -f "$CONF" ]; then
                 ;;
         esac
     else
-        # Legacy: thresholds in settings.conf
-        L2=$(grep "^cd_l2_temp=" "$CONF" | cut -d= -f2); L3=$(grep "^cd_l3_temp=" "$CONF" | cut -d= -f2)
-        L4=$(grep "^cd_l4_temp=" "$CONF" | cut -d= -f2); RC=$(grep "^cd_recover=" "$CONF" | cut -d= -f2)
-        if [ "${RC:-76}" -ge "${L2:-80}" ] 2>/dev/null; then _fail "recover >= l2";
-        elif [ "${L2:-80}" -ge "${L3:-82}" ] 2>/dev/null; then _fail "l2 >= l3";
-        elif [ "${L3:-82}" -ge "${L4:-88}" ] 2>/dev/null; then _fail "l3 >= l4";
-        else _pass "thresholds ${RC}°<${L2}°<${L3}°<${L4}°"; fi
+        # v1.6.9 Legacy (delegated=0): gleiche cd_thresholds-Validierung wie
+        # oben — die alten cd_l2_temp=/cd_l3_temp=/...-Keys existieren in der
+        # shipped settings.conf nicht mehr und prüften mit Default-Fallbacks
+        # ins Leere (Vakuum-Pass).
+        CDT=$(grep "^cd_thresholds=" "$CONF" | cut -d= -f2- | tr -d '\r')
+        _n=$(printf '%s' "$CDT" | wc -w 2>/dev/null)
+        if [ -z "$CDT" ]; then
+            _fail "cd_thresholds fehlt (legacy)"
+        elif [ "${_n:-0}" -ne 7 ] 2>/dev/null; then
+            _fail "cd_thresholds: erwartet 7 Werte, hat $_n"
+        else
+            set -- $CDT
+            if [ "$4" -ge "$1" ] 2>/dev/null; then _fail "cd_thresholds: rec($4) >= l2t($1)"
+            elif [ "$1" -ge "$2" ] 2>/dev/null; then _fail "cd_thresholds: l2t($1) >= l3t($2)"
+            elif [ "$2" -ge "$3" ] 2>/dev/null; then _fail "cd_thresholds: l3t($2) >= l4t($3)"
+            elif [ "$5" -lt "$6" ] 2>/dev/null || [ "$6" -lt "$7" ] 2>/dev/null; then _fail "cd_thresholds: Gold-Grenzen nicht absteigend"
+            else _pass "cd_thresholds (legacy) $CDT" ; fi
+        fi
     fi
 
     m=$(grep "^mode=" "$CONF" | cut -d= -f2 | tr -d ' ')

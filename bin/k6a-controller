@@ -284,7 +284,9 @@ _startup() {
             STALE=1
         elif [ -d "/proc/$OLD" ]; then
             c=$(tr '\0' ' ' < "/proc/$OLD/cmdline" 2>/dev/null)
-            case "$c" in *k6a-ctl*) err "läuft bereits (pid $OLD)"; exit 1 ;; *) STALE=1 ;; esac
+            # v1.6.9: *k6a-ctl* matchte auch "tail -f …/k6a-ctl/…" (False
+            # Positive → exit 1 → Crash-Zählung). Nur der eigene Binary-Pfad.
+            case "$c" in *k6a-controller*) err "läuft bereits (pid $OLD)"; exit 1 ;; *) STALE=1 ;; esac
         else
             STALE=1
         fi
@@ -352,7 +354,7 @@ _startup() {
     _apply_gov_caps
     _fix_usb_autosuspend
     _turbo_recover
-    log "k6a-ctl ${_MODVER:-v1.6.8} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} gpu_caps=${GPUCAPS:-kernel-default} poll_adaptive=${POLL_ADAPT:-kernel-default} cd_ladder=${CD_LADDER:-kernel-default} silver_caps=${SILCAPS:-kernel-default} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
+    log "k6a-ctl ${_MODVER:-v1.6.9} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} gpu_caps=${GPUCAPS:-kernel-default} poll_adaptive=${POLL_ADAPT:-kernel-default} cd_ladder=${CD_LADDER:-kernel-default} silver_caps=${SILCAPS:-kernel-default} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
@@ -463,9 +465,9 @@ _apply_gold_cap() { # $1=Hz (0 = aufheben)
     case "$want" in ''|*[!0-9]*) want=0 ;; esac
     [ "$_GOLD_CAP_APPLIED" = "$want" ] && return 0
     if [ "$want" = "0" ]; then
-        w "$P6/scaling_max_freq" "$GOLD_MAX"
+        w_checked "$P6/scaling_max_freq" "$GOLD_MAX"
     else
-        w "$P6/scaling_max_freq" "$want"
+        w_checked "$P6/scaling_max_freq" "$want"
     fi
     cur=$(r "$P6/scaling_max_freq")
     _GOLD_CAP_APPLIED=$want
@@ -482,9 +484,9 @@ _apply_silver_cap() { # $1=Hz (0 = default)
     [ "$SILVER_MAX" -gt 0 ] 2>/dev/null && [ "$want" -gt "$SILVER_MAX" ] && want=$SILVER_MAX
     [ "$_SIL_CAP_APPLIED" = "$want" ] && return 0
     if [ "$want" = "0" ]; then
-        w "$P0/scaling_max_freq" "$SILVER_MAX"
+        w_checked "$P0/scaling_max_freq" "$SILVER_MAX"
     else
-        w "$P0/scaling_max_freq" "$want"
+        w_checked "$P0/scaling_max_freq" "$want"
     fi
     cur=$(r "$P0/scaling_max_freq")
     _SIL_CAP_APPLIED=$want

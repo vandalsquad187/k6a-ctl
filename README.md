@@ -56,12 +56,12 @@ fällt das Modul automatisch auf einen bewährten Userspace-Cooldowner zurück.
   exakt wie der Kernel sie parst (`sscanf("%u %u %u %u %u %u")`)
 - **Live-Status Build 340** — `policy_max`, `state_age_ms`, `temp_src`, `temp_valid`,
   `game_pid`, `battery_guard` aus dem Kernel gelesen und in `data.txt` / WebUI gespiegelt
-- **Legacy-Fallback** — vollständige Userspace-State-Machine (CD_L2/L3/L4 + Recover)
-  mit adaptiver Hysterese, falls kein In-Kernel-Governor vorhanden ist
+- **Legacy-Fallback** — ohne In-Kernel-Governor nur Modus-Caps (DAILY/GAMING) und
+  direkte Freq-Caps; die CD_L2–L4-State-Machine lebt ausschließlich im Kernel
 - **Dynamische Clock-Tables** — liest `scaling_available_frequencies` zur Laufzeit,
   null hardcodierte Frequenzen, funktioniert auf jeder Kernel-Variante
-- **Cooldown mit adaptiver Hysterese** — steiler Temp-Anstieg (+5°/Tick) → kurzes Dwell,
-  sonst normales Dwell; Schwellen konfigurierbar
+- **Cooldown** — Schwellen (`cd_thresholds`) konfigurierbar; Enforcement und
+  adaptive Hysterese sind kernel-seitig (k6a_gov)
 - **Localhost-WebUI-Transport** — `nc -L :8767` Control-Server mit Whitelist-Endpoints,
   immun gegen KernelSU-Bridge-Änderungen, aus jedem Browser bedienbar
 - **Gesplittete WebUI** — `index.html` + `app.js` + `style.css`, kein Monolith
@@ -119,7 +119,7 @@ plus die Kernel-Cooldown-Zustände (nur im Legacy-Fallback):
 |---------|---------|------|---------|
 | `DAILY` | mode=daily | 5s | Monitoring, `gold_cap_daily`, schedutil daily, Gov aus |
 | `GAMING` | mode=gaming | 1s | `gold_cap_gaming`, Schwellwerte, schedutil gaming, Gov an, Props |
-| `CD_L2`–`CD_L4` | ≥ `l2t`/`l3t`/`l4t` | – | mit `k6a_gov`: kernel-seitig; ohne: Userspace-Fallback |
+| `CD_L2`–`CD_L4` | ≥ `l2t`/`l3t`/`l4t` | – | kernel-seitig (k6a_gov); ohne Gov: kein CD im Modul |
 
 ### Delegation (Auto-Erkennung)
 
@@ -128,7 +128,7 @@ Beim Start prüft der Controller `/sys/kernel/k6a_gov/`:
 - **vorhanden** → Cooldown-Enforcement delegiert an den Kernel; das Modul schreibt
   nur `enable`/`profile`, setzt Userspace-Caps spiegelnd zum Kernel-State ein
   und übernimmt Pinning/Props/Monitoring
-- **fehlt** → legacy userspace-cooldown (eigene State Machine + direkte Freq-Caps)
+- **fehlt** → nur Modus-Caps/Direct-Freq (kein Userspace-CD-State-Machine mehr)
 
 ### Config-Hot-Reload
 
@@ -156,7 +156,7 @@ das die Lib einmalig statt still zu scheitern.
 - Thread-`renice`/`oom_adj` nur bei State-Entry und alle 60 Ticks, nicht alle 5
 - `setprop` nur bei tatsächlichem Wertwechsel
 - `read_temp` liefert ohne lesbare Zone leer („--") statt eines erfundenen 40 °C
-- fehlgeschlagene Schreibzugriffe werden geloggt statt ignoriert (`w_checked`)
+- Caps-Schreibzugriffe (`cpu_apply`/`gpu_limits`/Gold-/Silver-Cap) loggen Fehler via `w_checked`; Hot-Path-`gov_write` bleibt bewusst still (alte Kernel ohne Node)
 - `k6a_gov.ko`: Kandidat mit passender Version wird gewählt, statt beim ersten
   vorhandenen (ggf. falschen) stehen zu bleiben
 
@@ -184,7 +184,7 @@ Der In-Kernel-Governor und dieses Modul teilen sich die Arbeit nach dem Prinzip
 | Aufgabe | Kernel (k6a_gov) | Modul (k6a-ctl) |
 |---------|------------------|------------------|
 | Thermal-Trips raise/disable | ✔ (v1.0.8+) | nur im Legacy-Fallback |
-| Cooldown L2-L4 State Machine | ✔ (250ms-Kthread, Hz-basiert) | Fallback + Spiegel |
+| Cooldown L2-L4 State Machine | ✔ (250ms-Kthread, Hz-basiert) | – (kein Userspace-Fallback) |
 | GPU thermal floor | – (bewusst entfernt: Hard-Hang-Verdächtiger) | – |
 | CPU max enforcement während CD | ✔ cpufreq-notifier | **nur im Legacy-Modus** (Sicherheitsnetz) |
 | BW-Floors (`gpubw`/`llcc`) | ✔ `bw_floors` (Build 340 release-fähig) | schreibt nur im Legacy-Modus |
@@ -193,9 +193,9 @@ Der In-Kernel-Governor und dieses Modul teilen sich die Arbeit nach dem Prinzip
 | `game_pid` | speichert/echoed, wirkt nie darauf | ✔ `pidof $game_pkg` |
 | OFF→GAMING Aktivierung | ✔ (v1.0.5+) | schreibt nur enable/profile |
 | Input-Boost + Schedutil-Tunables | – | ✔ einmalig pro Moduswechsel |
-| RenderThread-Pinning (taskset/chrt) | – (braucht PID/comm-Scan) | ✔ alle 5 Ticks in GAMING |
-| Props (game_mode/vulkan/fps) | – | ✔ bei GAMING-Start |
-| IRQ affinity | – | ✔ einmalig bei GAMING-Start |
+| RenderThread-Pinning (taskset/chrt) | – | – (entfernt v1.4.0: cpuset setzt zurück) |
+| Props (game_mode/vulkan) | – | ✔ bei GAMING-Start (kein fps-Prop) |
+| IRQ affinity | – | – (nicht implementiert) |
 | Monitoring/WebUI/data.txt | – | ✔ |
 
 **Handshake beim Boot:** existiert `/sys/kernel/k6a_gov/` → Delegationsmodus;
@@ -238,7 +238,7 @@ seit v1.0.6 macht der Kernel bewusst **CPU-only**.
 | `silver_cap_gaming` | 0 | v1.4.2: Silver-Cluster (policy0) Deckel während GAMING (Hz, `0` = Boot-Max) |
 | `gpu_cap_gaming` | 0 | v1.4.2: GPU (kgsl `devfreq/max_freq` + `max_gpuclk`) Deckel während GAMING (Hz, `0` = Boot-Max 800 MHz) |
 | `gold_cap_daily` | 1555200 | dasselbe im Daily-Modus |
-| `cd_thresholds` | 96 99 102 93 1708800 1555200 1324800 | `l2t l3t l4t rec l2g l3g l4g` — Reihenfolge kernel-fix, wird beim Start idempotent angewendet (seit build352 = Kernel-GAMING-Default) |
+| `cd_thresholds` | 72 80 87 66 1708800 1555200 1324800 | `l2t l3t l4t rec l2g l3g l4g` — Reihenfolge kernel-fix, wird beim Start idempotent angewendet. **Shipped = user-tuned D1 (R2-validiert 2026-11-19)**; Kernel-GAMING-Profil-Default 96/99/102/93 greift nur ohne Key (Fußnote, siehe settings.conf) |
 | `game_pkg` | CODM | Package für renice/oom-Boost |
 | `battery_guard` | `on` | Akku-Guard an/aus → `/sys/kernel/k6a_gov/battery_guard` (0/1) |
 | `battery_guard_temp` | 45 | Akku-Guard-Schwelle (35–60 °C) |

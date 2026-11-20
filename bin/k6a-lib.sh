@@ -88,9 +88,10 @@ _cache_thermal_zones() {
             *cpu-0-*usr*|*cpuss-0*|*silver*|*cluster0*) [ -z "$TZ_SILVER" ] && TZ_SILVER="${zone}temp" ;;
         esac
     done
-    [ -z "$TZ_GOLD" ] && TZ_GOLD="/sys/devices/virtual/thermal/thermal_zone0/temp"
+    # v1.6.9: KEIN Fallback auf thermal_zone0 — auf sweet ist das pm6150-tz
+    # (PMIC, kein Gold-CPU). Leer lassen: read_temp → rc=1, kein Auto-Switch.
     [ -z "$TZ_SILVER" ] && TZ_SILVER="$TZ_FALLBACK"
-    log "zones: Gold=$TZ_GOLD Silver=$TZ_SILVER"
+    log "zones: Gold=${TZ_GOLD:-none} Silver=${TZ_SILVER:-none}"
 }
 
 read_temp() { # v1.5.2: setzt TEMP_NOW (global, fork-free); rc=1 wenn keine Zone lesbar
@@ -106,14 +107,18 @@ read_temp() { # v1.5.2: setzt TEMP_NOW (global, fork-free); rc=1 wenn keine Zone
 }
 
 # ── cpu/gpu apply ───────────────────────────────────────────────────────────
+# v1.6.9: Caps laufen über w_checked (one-shot, Change-Detection → kein
+# Log-Spam). Hot-Path gov_write bleibt w() — dort sind Fehlschläge bei
+# alten Kernel ohne Node absichtlich still.
 cpu_apply() { # $1=sil_max $2=gold_max
-    w "$P0/scaling_max_freq" "$1"
-    w "$P6/scaling_max_freq" "$2"
+    w_checked "$P0/scaling_max_freq" "$1"
+    w_checked "$P6/scaling_max_freq" "$2"
 }
 
 gpu_limits() { # $1=max_hz ($GPU_MAX = frei)
-    w "$GPU/devfreq/max_freq" "${1:-$GPU_MAX}"
-    [ -e "$GPU/max_gpuclk" ] && w "$GPU/max_gpuclk" "${1:-$GPU_MAX}"
+    w_checked "$GPU/devfreq/max_freq" "${1:-$GPU_MAX}"
+    [ -e "$GPU/max_gpuclk" ] && w_checked "$GPU/max_gpuclk" "${1:-$GPU_MAX}"
+    return 0
 }
 
 # ── governor: init.qcom.post_boot.sh schreibt ein nicht existierendes 'reflex'

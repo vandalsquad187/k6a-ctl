@@ -109,7 +109,9 @@ log "service start"
         : # laeuft bereits — nichts tun
     else
         rm -f "$PIDF"
-        if grep -qi ':223F[[:space:]]' /proc/net/tcp 2>/dev/null; then
+        # v1.6.9: nur die LOKALE Spalte (/proc/net/tcp Feld 2) prüfen —
+        # das alte ':223F[[:space:]]' matchte auch Remote-Adressen.
+        if awk '$2 ~ /:223F$/ {found=1} END{exit !found}' /proc/net/tcp 2>/dev/null; then
             log "webui :8767 belegt (fremd) — kein spawn"
         else
             setsid sh "$MODDIR/bin/webui-server.sh" >/dev/null 2>&1 </dev/null &
@@ -137,8 +139,11 @@ while true; do
     _now=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0); case "$_now" in ''|*[!0-9]*) _now=0 ;; esac
     if [ $(( _now - _window )) -lt 60 ]; then
         _crashes=$(( _crashes + 1 ))
-        [ "$_crashes" -gt 10 ] && { log "crash storm — gebe auf"; break; }
+        # v1.6.9: kein break mehr — der Watchdog bleibt am Leben (Backoff
+        # capped bei 30 s). Vorher starb die Schleife bis zum Reboot.
+        [ "$_crashes" -gt 10 ] && log "crash storm ($_crashes in 60s) — weiter mit max-Backoff"
         [ "$_backoff" -lt 30 ] && _backoff=$(( _backoff * 2 ))
+        [ "$_backoff" -gt 30 ] && _backoff=30
     else
         _crashes=1; _backoff=3; _window=$_now
     fi

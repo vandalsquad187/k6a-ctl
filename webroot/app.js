@@ -1,16 +1,8 @@
-// k6a-ctl app.js v1.3.2 (token-aware; KTOKEN wird von service.sh befüllt)
+// k6a-ctl app.js v1.3.3 (token-aware; KTOKEN wird von service.sh befüllt)
+// v1.6.9: ksuExec entfernt (tote Root-Bridge), Hist-Zeilen nur noch textContent.
 const KTOKEN='';
 var d = {};
 var _toastT = null;
-
-function ksuExec(cmd){
-try{
-if(window.ksu&&typeof window.ksu.exec==='function'){
-try{window.ksu.exec(cmd,'',function(){})}catch(e1){}
-try{window.ksu.exec(cmd)}catch(e2){}
-return}}catch(e){}
-try{if(window.KernelSU&&window.KernelSU.exec){window.KernelSU.exec(cmd,'',function(){})}}catch(e3){}
-}
 
 function api(path) {
     var sep = path.indexOf('?') === -1 ? '?' : '&';
@@ -194,17 +186,20 @@ function render() {
     for (var i = 0; i < 3; i++) {
         var gi = document.getElementById('bw_gpubw_' + i);
         var li = document.getElementById('bw_llcc_' + i);
-        if (gi) gi.value = bw.gpubw[i] || 0;
-        if (li) li.value = bw.llcc[i] || 0;
+        if (gi && document.activeElement !== gi) gi.value = bw.gpubw[i] || 0;
+        if (li && document.activeElement !== li) li.value = bw.llcc[i] || 0;
     }
 
     var histBody = document.getElementById('histBody');
     var hist = parseHist(d.gov_hist);
     if (histBody) {
-        histBody.innerHTML = '';
+        while (histBody.firstChild) histBody.removeChild(histBody.firstChild);
         hist.forEach(function(h) {
             var tr = document.createElement('tr');
-            tr.innerHTML = '<td>' + h.time + '</td><td>' + h.temp + '</td><td>' + h.trans + '</td>';
+            var td1 = document.createElement('td'); td1.textContent = h.time;
+            var td2 = document.createElement('td'); td2.textContent = h.temp;
+            var td3 = document.createElement('td'); td3.textContent = h.trans;
+            tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
             histBody.appendChild(tr);
         });
         // v1.6.5: HB-Diag aus data.txt (C5) — statt nur service.log
@@ -229,12 +224,12 @@ function render() {
     if (d.gold_cap !== undefined) gc.checked = d.gold_cap !== '0';
 }
 
-setInterval(fetchData, 2000);
-fetchData();
-
 /* v1.6.3: Webui-Backoff — sichtbar alle 2 s, im Hintergrund (Tab hidden /
- * Bildschirm aus) alle 10 s. Spart nc-Traffic und Controller-CPU im Idle. */
+ * Bildschirm aus) alle 10 s. Spart nc-Traffic und Controller-CPU im Idle.
+ * v1.6.9: das zweite bare setInterval (frühere Zeile "setInterval(fetchData,2000)")
+ * ist entfernt — sonst liefen immer zwei Timer und der Backoff war wirkungslos. */
 var fetchTimer = setInterval(fetchData, 2000);
+fetchData();
 document.addEventListener("visibilitychange", function(){
     clearInterval(fetchTimer);
     fetchTimer = setInterval(fetchData, document.hidden ? 10000 : 2000);

@@ -33,17 +33,27 @@ _setcfg_locked() {
     local k="$1" v="$2" tmp
     tmp=$(mktemp "${CONF}.tmp.XXXXXX" 2>/dev/null) || return 1
     if grep -q "^${k}=" "$CONF" 2>/dev/null; then
-        grep -v "^${k}=" "$CONF" > "$tmp" 2>/dev/null
-        printf '%s=%s\n' "$k" "$v" >> "$tmp"
+        grep -v "^${k}=" "$CONF" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+        printf '%s=%s\n' "$k" "$v" >> "$tmp" || { rm -f "$tmp"; return 1; }
     else
-        cat "$CONF" > "$tmp" 2>/dev/null
-        printf '%s=%s\n' "$k" "$v" >> "$tmp"
+        cat "$CONF" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+        printf '%s=%s\n' "$k" "$v" >> "$tmp" || { rm -f "$tmp"; return 1; }
     fi
-    mv -f "$tmp" "$CONF" 2>/dev/null || { cat "$tmp" > "$CONF" 2>/dev/null; rm -f "$tmp"; }
+    if mv -f "$tmp" "$CONF" 2>/dev/null; then
+        return 0
+    fi
+    # Fallback: Copy-in-Place — erst wenn DAS fehlschlägt, ist es ein Fehler
+    if cat "$tmp" > "$CONF" 2>/dev/null; then
+        rm -f "$tmp"
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
 }
 # Lock um den Read-Modify-Write: gleichzeitige Requests dürfen sich keine Keys wegnehmen
+# v1.6.9: rc von _setcfg_locked durchreichen (vorher ging er verloren → immer ok)
 setcfg() {
-    local lk="${CONF}.lock" i=0
+    local lk="${CONF}.lock" i=0 rc=0
     while ! mkdir "$lk" 2>/dev/null; do
         i=$((i+1))
         if [ "$i" -gt 40 ]; then          # veralteter Lock (>2 s): brechen
@@ -54,7 +64,9 @@ setcfg() {
         sleep 0.05
     done
     _setcfg_locked "$@"
+    rc=$?
     rmdir "$lk" 2>/dev/null
+    return $rc
 }
 bw_set() {
     local vals="$1" a b c d e f
@@ -89,32 +101,32 @@ case "$P" in
     /mode)
 _auth_or_bad
         case "$Q" in
-            m=gaming|m=daily|m=auto) setcfg mode "${Q#m=}"; ok ;;
+            m=gaming|m=daily|m=auto) if setcfg mode "${Q#m=}"; then ok; else bad; fi ;;
             *) bad ;;
         esac ;;
     /thermal)
 _auth_or_bad
         case "$Q" in
-            t=on|t=off) setcfg thermal_protect "${Q#t=}"; ok ;;
+            t=on|t=off) if setcfg thermal_protect "${Q#t=}"; then ok; else bad; fi ;;
             *) bad ;;
         esac ;;
     /goldcap)
 _auth_or_bad
         case "$Q" in
-            g=on) setcfg gold_cap_gaming 1708800; ok ;;
-            g=off) setcfg gold_cap_gaming 0; ok ;;
+            g=on) if setcfg gold_cap_gaming 1708800; then ok; else bad; fi ;;
+            g=off) if setcfg gold_cap_gaming 0; then ok; else bad; fi ;;
             *) bad ;;
         esac ;;
     /profile)
 _auth_or_bad
         case "$Q" in
-            p=gaming|p=battery|p=badazz|p=badazz_safe|p=custom|p=off) setcfg profile "${Q#p=}"; ok ;;
+            p=gaming|p=battery|p=badazz|p=badazz_safe|p=custom|p=off) if setcfg profile "${Q#p=}"; then ok; else bad; fi ;;
             *) bad ;;
         esac ;;
     /delegated)
 _auth_or_bad
         case "$Q" in
-            d=0|d=1) setcfg delegated "${Q#d=}"; ok ;;
+            d=0|d=1) if setcfg delegated "${Q#d=}"; then ok; else bad; fi ;;
             *) bad ;;
         esac ;;
     /bw_floors)
@@ -132,10 +144,10 @@ _auth_or_bad
                 v="${Q#t=}"
                 case "$v" in ''|*[!0-9]*) bad ;; *)
                     if [ "$v" -ge 35 ] 2>/dev/null && [ "$v" -le 60 ] 2>/dev/null; then
-                        setcfg battery_guard_temp "$v"; ok
+                        if setcfg battery_guard_temp "$v"; then ok; else bad; fi
                     else bad; fi ;; esac ;;
-            e=1) setcfg battery_guard on; ok ;;
-            e=0) setcfg battery_guard off; ok ;;
+            e=1) if setcfg battery_guard on; then ok; else bad; fi ;;
+            e=0) if setcfg battery_guard off; then ok; else bad; fi ;;
             *) bad ;;
         esac ;;
     /ping)
