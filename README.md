@@ -230,7 +230,7 @@ seit v1.0.6 macht der Kernel bewusst **CPU-only**.
 
 | Key | Default | Bedeutung |
 |-----|---------|-----------|
-| `mode` | `gaming` | `gaming` / `daily` — einziger Schalter, sonst nichts |
+| `mode` | `auto` | `gaming` / `daily` / `auto` — einziger Schalter; `auto` = Game-Detect + Hysterese (Shipped-Default für Neuinstallationen) |
 | `thermal_protect` | `on` | v1.4.3 **wirksam**: `on` = Gaming-Deckel aktiv (gold/silver/gpu per settings.conf), `off` = Deckel pausiert (→ Boot-Max); `battery_guard`, `auto_badazz_switch`, `cd_thresholds` bleiben unabhängig aktiv |
 | `delegated` | `1` | `1` = Kernel-Governor erzwingt (`legacy=1`), `0` = reines Userspace (`legacy=0`) |
 | `profile` | `custom` | `gaming` / `battery` / `badazz` / `badazz_safe` / `custom` — `custom` behält die `cd_thresholds` |

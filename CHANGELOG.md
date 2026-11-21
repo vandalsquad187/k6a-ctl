@@ -1,7 +1,18 @@
 # k6a-ctl — Versionshistorie
 
 > Ausgelagert aus `README.md` beim Docs-Umbau 2026-11-19. Neueste Eintraege zuerst.
-> Inhalt unverändert.
+> Inhalt unveraendert.
+
+## 2026-11-21 — v1.6.10: Review-Quickwins (description, r()-Warn, mode-Default)
+Zweites externes Review, verifiziert (u. a. sepolicy=No-op empirisch widerlegt
+durch Finding 3 / hash_state); nur P4+P5+P1 umgesetzt:
+- **module.prop**: description auf Kurztext gestrafft (vorher ~3 KB Changelog im
+  Prop — Fossil). Details bleiben in dieser Datei.
+- **`r()` warn-once**: fehlende Pfade werden pro Pfad einmal geloggt
+  (`run/.rmiss`, subshell-sicher), Rueckgabe weiterhin `0`.
+- **Default `mode=auto`** (nur Shipped-Template / Neuinstallationen). Bestehende
+  `settings.conf` beim Upgrade **nicht** ueberschreiben — Device behaelt gaming.
+- Banner-Fallback `v1.6.10`, versionCode 180.
 
 ## 2026-11-20 — v1.6.9: P1+P2 Review-Fixes (Sicherheit/Bugs/Robustheit/Doku)
 Externe 18-Punkte-Review, verifiziert und als P1+P2 umgesetzt (kein Kernel-Flash):

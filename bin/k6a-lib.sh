@@ -23,7 +23,20 @@ warn() { _logrot; printf '[%s] [WARN] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FI
 err()  { _logrot; printf '[%s] [ERROR] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }
 dbg()  { [ "${CFG_DEBUG:-0}" = "1" ] && { _logrot; printf '[%s] [DBG] %s\n' "$(date +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null; }; }
 
-r() { cat "$1" 2>/dev/null || echo "0"; }
+# r() — cat mit Default 0. Warn-once pro Pfad (File-Marker, subshell-sicher:
+# fast alle Caller laufen in $(…); Variablen-Flag wuerde verloren gehen).
+r() {
+    if cat "$1" 2>/dev/null; then
+        return 0
+    fi
+    local _mf="$MODDIR/run/.rmiss"
+    if ! grep -qxF -- "$1" "$_mf" 2>/dev/null; then
+        mkdir -p "$MODDIR/run" 2>/dev/null
+        printf '%s\n' "$1" >> "$_mf" 2>/dev/null
+        warn "r(): missing $1 → default 0"
+    fi
+    printf '0'
+}
 w() { printf '%s' "$2" > "$1" 2>/dev/null; }
 
 # _read_int <datei> <zielvar> [default] — erste Ganzzahl einer Datei in Zielvar
