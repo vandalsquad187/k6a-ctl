@@ -13,6 +13,13 @@ durch Finding 3 / hash_state); nur P4+P5+P1 umgesetzt:
 - **Default `mode=auto`** (nur Shipped-Template / Neuinstallationen). Bestehende
   `settings.conf` beim Upgrade **nicht** ueberschreiben — Device behaelt gaming.
 - Banner-Fallback `v1.6.10`, versionCode 180.
+- **sepolicy-Kurz-Experiment (Review-P2 „No-op") — widerlegt, Regel bleibt**:
+  selinuxfs-Oracle `u:r:kernel:s0 → u:object_r:sysfs:s0` class file =
+  **`40012`** (read+open+getattr), dir = **`10040012`** — byte-identisch zum
+  Finding-3-Messwert in `k6a-gov-history.md`. Ohne Reboot laesst sich die
+  aus dem Boot geladene Policy nicht zuruecknehmen (`ksud sepolicy` kennt nur
+  apply/patch, kein remove); Live-Entfernen der Datei wuerde nichts aendern.
+  `hash_state=1` nach rmmod/insmod mit `retries=0`. Verdict: Review-P2 falsch.
 
 ## 2026-11-20 — v1.6.9: P1+P2 Review-Fixes (Sicherheit/Bugs/Robustheit/Doku)
 Externe 18-Punkte-Review, verifiziert und als P1+P2 umgesetzt (kein Kernel-Flash):
