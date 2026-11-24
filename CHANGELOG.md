@@ -3,6 +3,22 @@
 > Ausgelagert aus `README.md` beim Docs-Umbau 2026-11-19. Neueste Eintraege zuerst.
 > Inhalt unveraendert.
 
+## 2026-11-24 — v1.6.11: WebUI-Refresh (Header, Indicator, Themes)
+Dezent poliertes WebUI-Layout, auf-/zuklappbare Kacheln bleiben unveraendert:
+- **Header-Titel**: `k6a-ctl` → Glitch-/Strikethrough-Zeichenkette
+  `K̶̟͚͂͐͝6̶̹̰͉̀a̸̞͝-̸̻̱̠̇͑͝c̴̖̣͓͝t̷͕̩͛̅ĺ̸͉͓̗`, font-size 20px → 26px
+  (Pseudo-Vollbild 16px → 20px).
+- **State-Indicator (Header-Pill)**: „ein Tick" groesser (12px/4px → 14px/5px);
+  GAMING aktiv = hell gruen (`#86efac`/`#4ade80`), DAILY aktiv = hell orange
+  (`#fdba74`/`#fb923c`); CD-Pill-Farben unveraendert.
+- **4 neue Themes**: Gruvbox Dark, Tokio Night, Rose Pine, Solarized Dark —
+  CSS-Variablen-Override wie die bestehenden (github/vscode/dracula);
+  `data-th`-Keys `gruvbox|tokio|rosepine|solarized`, Theme-Buttons umbrechend
+  (`#themeSwitch{flex-wrap:wrap}`).
+- **Dezentes Polishing**: Kacheln mit feinem 1px-Rahmen + sanftem Schatten,
+  Chip-Hover/-Active-Uebergänge.
+- Banner-Fallback `v1.6.11`, versionCode 181.
+
 ## 2026-11-21 — v1.6.10: Review-Quickwins (description, r()-Warn, mode-Default)
 Zweites externes Review, verifiziert (u. a. sepolicy=No-op empirisch widerlegt
 durch Finding 3 / hash_state); nur P4+P5+P1 umgesetzt:

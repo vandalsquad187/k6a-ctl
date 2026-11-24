@@ -1,6 +1,6 @@
 id=k6a-ctl
 name=k6a-ctl
-version=1.6.10
-versionCode=180
+version=1.6.11
+versionCode=181
 author=BadaZz89
 description=Governor companion for BadazzKernel (k6a_gov): mode gaming/daily/auto, cd_thresholds 72/80/87/66, gold/silver caps, localhost WebUI. Details: CHANGELOG.md

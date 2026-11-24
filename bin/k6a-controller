@@ -354,7 +354,7 @@ _startup() {
     _apply_gov_caps
     _fix_usb_autosuspend
     _turbo_recover
-    log "k6a-ctl ${_MODVER:-v1.6.10} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} gpu_caps=${GPUCAPS:-kernel-default} poll_adaptive=${POLL_ADAPT:-kernel-default} cd_ladder=${CD_LADDER:-kernel-default} silver_caps=${SILCAPS:-kernel-default} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
+    log "k6a-ctl ${_MODVER:-v1.6.11} start (mode=$MODE thp=$THP delegated=$DELEGATED profile=$PROFILE batt_guard=$BATT_GUARD cap_g=${CAP_G:-0} cap_d=${CAP_D:-0} silver_cap=${SILCAP_G:-0} gpu_cap=${GPUCAP_G:-0} gpu_caps=${GPUCAPS:-kernel-default} poll_adaptive=${POLL_ADAPT:-kernel-default} cd_ladder=${CD_LADDER:-kernel-default} silver_caps=${SILCAPS:-kernel-default} turbo_stop=$TURBO_STOP turbo_spoof=$TURBO_SPOOF)"
     if gov_sysfs_exists; then
         local gv
         gv=$(gov_read "status" 2>/dev/null | grep -oE "version=[^ ]+" | head -1 | cut -d= -f2)
