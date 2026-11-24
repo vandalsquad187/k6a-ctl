@@ -9,8 +9,9 @@ Dezent poliertes WebUI-Layout, auf-/zuklappbare Kacheln bleiben unveraendert:
   `K̶̟͚͂͐͝6̶̹̰͉̀a̸̞͝-̸̻̱̠̇͑͝c̴̖̣͓͝t̷͕̩͛̅ĺ̸͉͓̗`, font-size 20px → 26px
   (Pseudo-Vollbild 16px → 20px).
 - **State-Indicator (Header-Pill)**: „ein Tick" groesser (12px/4px → 14px/5px);
-  GAMING aktiv = hell gruen (`#86efac`/`#4ade80`), DAILY aktiv = hell orange
-  (`#fdba74`/`#fb923c`); CD-Pill-Farben unveraendert.
+  GAMING aktiv = hell gruen (`#86efac`/`#4ade80`), DAILY aktiv = hell blau
+  (`#93c5fd`/`#60a5fa` — bewusst NICHT orange, keine Kollision mit CD-Pills);
+  CD-Pill-Farben unveraendert.
 - **4 neue Themes**: Gruvbox Dark, Tokio Night, Rose Pine, Solarized Dark —
   CSS-Variablen-Override wie die bestehenden (github/vscode/dracula);
   `data-th`-Keys `gruvbox|tokio|rosepine|solarized`, Theme-Buttons umbrechend

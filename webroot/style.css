@@ -7,7 +7,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,
 .header h1{font-size:26px;color:var(--orange);line-height:1.15}
 .pill{padding:5px 16px;border-radius:16px;font-size:14px;font-weight:700;background:var(--border);color:var(--sub);flex-shrink:0}
 .pill.gaming{background:#4ade8026;color:#86efac;border:1px solid #4ade80}
-.pill.daily{background:#fb923c26;color:#fdba74;border:1px solid #fb923c}
+.pill.daily{background:#60a5fa26;color:#93c5fd;border:1px solid #60a5fa}
 .pill.cd_l2,.pill.cd_l3,.pill.cd_l4{background:#c97d1a33;color:#ffb066;border:1px solid var(--orange)}
 
 .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px #00000018}
