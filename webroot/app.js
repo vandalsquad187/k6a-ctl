@@ -134,7 +134,7 @@ function render() {
     var st = (d.state || '--').toUpperCase();
     var pill = document.getElementById('statePill');
     pill.textContent = st;
-    pill.className = 'pill ' + (d.state || '');
+    pill.className = 'pill ' + (d.state || '').toLowerCase();
 
     document.getElementById('vTemp').textContent = (d.temp || '--') + '°C';
     document.getElementById('vSil').textContent  = (d.cpu_sil_mhz || '--') + ' MHz';

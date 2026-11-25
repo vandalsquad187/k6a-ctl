@@ -3,6 +3,15 @@
 > Ausgelagert aus `README.md` beim Docs-Umbau 2026-11-19. Neueste Eintraege zuerst.
 > Inhalt unveraendert.
 
+## 2026-11-25 — v1.6.12: State-Pill-Fix (Case-Sensitivity)
+- **Bug**: `app.js` setzte `pill.className = 'pill ' + d.state` mit
+  uppercase-Wert (`GAMING`/`DAILY` aus data.txt), CSS-Selektoren
+  `.pill.gaming`/`.pill.daily` sind case-sensitive → Pill blieb grau,
+  obwohl Gaming/Daily aktiv war. Textanzeige war betroffen (via
+  `.toUpperCase()` unsichtbar), Farbe nie.
+- Fix: `.toLowerCase()` beim Klassennamen (Zeile 137).
+- Banner-Fallback `v1.6.12`, versionCode 182.
+
 ## 2026-11-24 — v1.6.11: WebUI-Refresh (Header, Indicator, Themes)
 Dezent poliertes WebUI-Layout, auf-/zuklappbare Kacheln bleiben unveraendert:
 - **Header-Titel**: `k6a-ctl` → Glitch-/Strikethrough-Zeichenkette
